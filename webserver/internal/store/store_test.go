@@ -97,8 +97,8 @@ func TestRunningFallsBackToIdle(t *testing.T) {
 	}
 }
 
-func TestPreviewKeepsUTF8ValidForChinese(t *testing.T) {
-	input := strings.Repeat("中文测试", 100)
+func TestPreviewKeepsUTF8ValidForMultibyteText(t *testing.T) {
+	input := strings.Repeat("emoji🙂test", 100)
 	output := preview(input)
 
 	if !utf8.ValidString(output) {

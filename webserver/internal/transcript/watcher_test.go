@@ -1,18 +1,19 @@
 package transcript
 
 import (
+	"fmt"
 	"testing"
 
 	"github.com/vxider/codex-buddy/internal/model"
 )
 
 func TestParseLineUserMessage(t *testing.T) {
-	line := []byte(`{"timestamp":"2026-04-02T14:05:02.844Z","type":"event_msg","payload":{"type":"user_message","message":"继续"}}`)
+	line := []byte(fmt.Sprintf(`{"timestamp":"2026-04-02T14:05:02.844Z","type":"event_msg","payload":{"type":"user_message","message":"%s"}}`, model.ContinueCommandText))
 	update, ok := parseLine("sess-1", line)
 	if !ok {
 		t.Fatalf("expected parse success")
 	}
-	if update.LastUserPromptPreview != "继续" {
+	if update.LastUserPromptPreview != model.ContinueCommandText {
 		t.Fatalf("unexpected prompt preview: %q", update.LastUserPromptPreview)
 	}
 }

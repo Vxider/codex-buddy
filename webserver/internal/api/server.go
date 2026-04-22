@@ -178,7 +178,7 @@ func (s *Server) handleNotificationAction(w http.ResponseWriter, r *http.Request
 			http.Error(w, "notification is no longer actionable", http.StatusConflict)
 			return
 		}
-		if err := s.control.Continue(session, "继续"); err != nil {
+		if err := s.control.Continue(session, model.ContinueCommandText); err != nil {
 			http.Error(w, fmt.Sprintf("continue failed: %v", err), http.StatusBadGateway)
 			return
 		}
@@ -418,7 +418,7 @@ func (s *Server) handleSessionContinue(w http.ResponseWriter, r *http.Request, s
 		http.Error(w, "session is no longer actionable", http.StatusConflict)
 		return
 	}
-	if err := s.control.Continue(session, "继续"); err != nil {
+	if err := s.control.Continue(session, model.ContinueCommandText); err != nil {
 		http.Error(w, fmt.Sprintf("continue failed: %v", err), http.StatusBadGateway)
 		return
 	}

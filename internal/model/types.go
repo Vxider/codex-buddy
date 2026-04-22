@@ -111,6 +111,11 @@ const (
 	NotificationActionContinue NotificationAction = "continue"
 )
 
+// ContinueCommandText is the exact prompt text sent to Codex when a user
+// confirms a continue action. It is centralized here so the transport and
+// tests share one source of truth.
+const ContinueCommandText = "继续"
+
 type NotificationSnapshot struct {
 	ID          string               `json:"id"`
 	SessionID   string               `json:"session_id"`

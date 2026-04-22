@@ -104,7 +104,7 @@ func TestSessionContinueEndpoint(t *testing.T) {
 	if exec.session.SessionID != "sess-1" {
 		t.Fatalf("unexpected session id: %q", exec.session.SessionID)
 	}
-	if exec.text != "继续" {
+	if exec.text != model.ContinueCommandText {
 		t.Fatalf("unexpected continue text: %q", exec.text)
 	}
 
