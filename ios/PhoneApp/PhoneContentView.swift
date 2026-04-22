@@ -14,19 +14,17 @@ struct PhoneContentView: View {
             .navigationTitle("Codex Buddy")
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
-                    Button("Server") {
+                    Button {
                         showSettings = true
+                    } label: {
+                        Image(systemName: "gearshape")
                     }
                 }
                 ToolbarItem(placement: .topBarTrailing) {
                     Button {
                         Task { await model.refresh() }
                     } label: {
-                        if model.isLoading {
-                            ProgressView()
-                        } else {
-                            Text("Refresh")
-                        }
+                        Image(systemName: "arrow.clockwise")
                     }
                     .disabled(model.isLoading)
                 }
@@ -34,9 +32,13 @@ struct PhoneContentView: View {
             .refreshable {
                 await model.refresh()
             }
-            .task {
-                if model.snapshot.sessions.isEmpty {
-                    await model.refresh()
+            .task(id: scenePhase) {
+                guard scenePhase == .active else { return }
+                await model.refreshSilently()
+                while !Task.isCancelled {
+                    try? await Task.sleep(for: .seconds(5))
+                    guard !Task.isCancelled else { break }
+                    await model.refreshSilently()
                 }
             }
             .sheet(isPresented: $showSettings) {
@@ -50,10 +52,6 @@ struct PhoneContentView: View {
                 case .serverSettings:
                     showSettings = true
                 }
-            }
-            .onChange(of: scenePhase) { _, newPhase in
-                guard newPhase == .active else { return }
-                Task { await model.refresh() }
             }
             .alert("Connection Error", isPresented: Binding(
                 get: { model.errorMessage != nil },
@@ -87,9 +85,6 @@ struct PhoneContentView: View {
                     .font(.footnote)
                     .foregroundStyle(.secondary)
             }
-            Text(model.baseURLText.isEmpty ? "Set a base URL in Server settings." : model.baseURLText)
-                .font(.footnote)
-                .foregroundStyle(.secondary)
         }
     }
 
@@ -144,32 +139,141 @@ struct PhoneContentView: View {
 struct ServerSettingsView: View {
     @ObservedObject var model: PhoneAppModel
     @Environment(\.dismiss) private var dismiss
+    @State private var showEditor = false
+    @State private var editingServer: CodexBuddyServer?
 
     var body: some View {
         NavigationStack {
             Form {
-                Section("Codex Buddy Base URL") {
-                    TextField("https://codex-box.tailnet.ts.net", text: $model.baseURLText)
-                        .textInputAutocapitalization(.never)
-                        .autocorrectionDisabled()
-                        .keyboardType(.URL)
-                    Text("Use the Tailscale URL of the machine running the codex-buddy webserver.")
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
+                Section("Current Server") {
+                    if let activeServer = model.activeServer {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(activeServer.displayName)
+                                .font(.headline)
+                            Text(activeServer.baseURL)
+                                .font(.footnote)
+                                .foregroundStyle(.secondary)
+                        }
+                    } else {
+                        Text("Add a server to start connecting.")
+                            .foregroundStyle(.secondary)
+                    }
+                }
+
+                Section("Saved Servers") {
+                    if model.servers.isEmpty {
+                        Text("No servers configured")
+                            .foregroundStyle(.secondary)
+                    } else {
+                        ForEach(model.servers) { server in
+                            Button {
+                                Task { await model.selectServer(server) }
+                            } label: {
+                                HStack(spacing: 12) {
+                                    VStack(alignment: .leading, spacing: 4) {
+                                        Text(server.displayName)
+                                            .foregroundStyle(.primary)
+                                        Text(server.baseURL)
+                                            .font(.footnote)
+                                            .foregroundStyle(.secondary)
+                                    }
+                                    Spacer()
+                                    if model.selectedServerID == server.id {
+                                        Image(systemName: "checkmark.circle.fill")
+                                            .foregroundStyle(.tint)
+                                    }
+                                }
+                            }
+                            .buttonStyle(.plain)
+                            .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                                Button("Edit") {
+                                    editingServer = server
+                                    showEditor = true
+                                }
+                                Button("Delete", role: .destructive) {
+                                    model.deleteServer(server)
+                                }
+                            }
+                        }
+                    }
                 }
             }
-            .navigationTitle("Server")
+            .navigationTitle("Servers")
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
                     Button("Close") { dismiss() }
                 }
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button("Save") {
-                        model.saveServerURL()
-                        Task { await model.refresh() }
-                        dismiss()
+                    Button {
+                        editingServer = nil
+                        showEditor = true
+                    } label: {
+                        Image(systemName: "plus")
                     }
                 }
+            }
+            .sheet(isPresented: $showEditor) {
+                ServerEditorView(model: model, editingServer: editingServer)
+            }
+        }
+    }
+}
+
+private struct ServerEditorView: View {
+    @ObservedObject var model: PhoneAppModel
+    let editingServer: CodexBuddyServer?
+
+    @Environment(\.dismiss) private var dismiss
+    @State private var name: String
+    @State private var baseURL: String
+    @State private var errorMessage: String?
+
+    init(model: PhoneAppModel, editingServer: CodexBuddyServer?) {
+        self.model = model
+        self.editingServer = editingServer
+        _name = State(initialValue: editingServer?.name ?? "")
+        _baseURL = State(initialValue: editingServer?.baseURL ?? "")
+    }
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section("Server") {
+                    TextField("Office", text: $name)
+                    TextField("http://100.82.10.4:8787", text: $baseURL)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                        .keyboardType(.URL)
+                    Text("You can save multiple HTTP or HTTPS Codex Buddy servers and switch between them at any time.")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .navigationTitle(editingServer == nil ? "Add Server" : "Edit Server")
+            .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button("Cancel") { dismiss() }
+                }
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("Save") {
+                        do {
+                            try model.saveServer(name: name, baseURL: baseURL, editing: editingServer)
+                            Task { await model.refreshSilently() }
+                            dismiss()
+                        } catch {
+                            errorMessage = error.localizedDescription
+                        }
+                    }
+                    .disabled(baseURL.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                }
+            }
+            .alert("Invalid Server", isPresented: Binding(
+                get: { errorMessage != nil },
+                set: { if !$0 { errorMessage = nil } }
+            )) {
+                Button("OK", role: .cancel) {}
+            } message: {
+                Text(errorMessage ?? "Unknown error")
             }
         }
     }

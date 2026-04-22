@@ -22,14 +22,17 @@ final class CompanionBridge: NSObject {
         guard WCSession.isSupported() else { return }
         guard let payload = encode(snapshot: snapshot) else { return }
         let session = WCSession.default
+        guard session.activationState == .activated,
+              session.isPaired,
+              session.isWatchAppInstalled else {
+            return
+        }
         do {
             try session.updateApplicationContext(["snapshot": payload])
         } catch {
             // Ignore transient connectivity errors.
         }
-        if session.isPaired, session.isWatchAppInstalled {
-            session.transferCurrentComplicationUserInfo(["snapshot": payload])
-        }
+        session.transferCurrentComplicationUserInfo(["snapshot": payload])
     }
 
     private func encode(snapshot: CodexStatusSnapshot) -> String? {
@@ -93,7 +96,12 @@ extension CompanionBridge: WCSessionDelegate {
                         throw CodexAPIError.missingContinueAction
                     }
                     let response = try await api.continueSession(item)
-                    let latest = response.status ?? (try await api.loadStatus())
+                    let latest: CodexStatusSnapshot
+                    if let status = response.status {
+                        latest = status
+                    } else {
+                        latest = try await api.loadStatus()
+                    }
                     self.push(snapshot: latest)
                     replyHandler(self.reply(snapshot: latest))
                 default:
