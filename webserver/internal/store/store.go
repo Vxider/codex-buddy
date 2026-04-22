@@ -289,6 +289,42 @@ func (s *Store) ContinueTarget(id, token string) (model.NotificationSnapshot, mo
 	return *notification, derived, true
 }
 
+func (s *Store) ContinueTargetForSession(sessionID string) (model.NotificationSnapshot, model.SessionSnapshot, bool) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	var latest *model.NotificationSnapshot
+	for _, notification := range s.notifications {
+		if notification.SessionID != sessionID {
+			continue
+		}
+		if !s.isNotificationVisibleLocked(notification) {
+			continue
+		}
+		if !slices.Contains(notification.Actions, model.NotificationActionContinue) {
+			continue
+		}
+		if latest == nil || notification.UpdatedAt.After(latest.UpdatedAt) {
+			latest = notification
+		}
+	}
+	if latest == nil {
+		return model.NotificationSnapshot{}, model.SessionSnapshot{}, false
+	}
+
+	session, ok := s.sessions[latest.SessionID]
+	if !ok {
+		return model.NotificationSnapshot{}, model.SessionSnapshot{}, false
+	}
+
+	derived := s.deriveSession(session.SessionSnapshot)
+	if derived.State != model.StateAttention || derived.TmuxPane == "" {
+		return model.NotificationSnapshot{}, model.SessionSnapshot{}, false
+	}
+
+	return *latest, derived, true
+}
+
 func (s *Store) MarkNotificationActed(id string) (model.NotificationSnapshot, bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()

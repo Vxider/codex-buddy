@@ -457,7 +457,7 @@ func (s *Server) continueTargetForSession(sessionID, token string) (model.Notifi
 		}
 		return s.store.ContinueTarget(notification.ID, token)
 	}
-	return model.NotificationSnapshot{}, model.SessionSnapshot{}, false
+	return s.store.ContinueTargetForSession(sessionID)
 }
 
 func shortSessionID(value string) string {
