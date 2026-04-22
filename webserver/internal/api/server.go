@@ -30,12 +30,18 @@ type publicSession struct {
 	SessionID        string                `json:"session_id"`
 	ShortSessionID   string                `json:"short_session_id,omitempty"`
 	DisplayTitle     string                `json:"display_title,omitempty"`
+	CompactTitle     string                `json:"compact_title,omitempty"`
+	MicroTitle       string                `json:"micro_title,omitempty"`
 	State            model.State           `json:"state"`
 	StateDetail      string                `json:"state_detail,omitempty"`
 	UpdatedAt        time.Time             `json:"updated_at"`
 	Summary          string                `json:"summary,omitempty"`
+	CompactSummary   string                `json:"compact_summary,omitempty"`
+	MicroSummary     string                `json:"micro_summary,omitempty"`
 	NeedsAttention   bool                  `json:"needs_attention"`
 	AttentionSummary string                `json:"attention_summary,omitempty"`
+	CompactAttention string                `json:"compact_attention_summary,omitempty"`
+	MicroAttention   string                `json:"micro_attention_summary,omitempty"`
 	CanContinue      bool                  `json:"can_continue"`
 	ContinueAction   *publicContinueAction `json:"continue_action,omitempty"`
 }
@@ -53,6 +59,8 @@ type publicStatus struct {
 	OverallStateDetail        string          `json:"overall_state_detail,omitempty"`
 	ActiveSessionID           string          `json:"active_session_id,omitempty"`
 	ActiveSessionDisplayTitle string          `json:"active_session_display_title,omitempty"`
+	ActiveSessionCompactTitle string          `json:"active_session_compact_title,omitempty"`
+	ActiveSessionMicroTitle   string          `json:"active_session_micro_title,omitempty"`
 	SessionsCount             int             `json:"sessions_count"`
 	Sessions                  []publicSession `json:"sessions"`
 }
@@ -68,6 +76,12 @@ type publicNotification struct {
 	UpdatedAt   time.Time                  `json:"updated_at"`
 	ActionToken string                     `json:"action_token,omitempty"`
 	Actions     []model.NotificationAction `json:"actions,omitempty"`
+}
+
+type sessionTitleSet struct {
+	Display string
+	Compact string
+	Micro   string
 }
 
 func NewServer(cfg config.Config, sessionStore *store.Store, transcriptManager *transcript.Manager, executor control.ContinueExecutor, logger *log.Logger) *Server {
@@ -197,8 +211,9 @@ func (s *Server) handleNotificationAction(w http.ResponseWriter, r *http.Request
 }
 
 func (s *Server) handleSessions(w http.ResponseWriter, _ *http.Request) {
+	sessions := s.store.Sessions()
 	writeJSON(w, http.StatusOK, map[string]any{
-		"sessions": s.publicSessions(s.store.Sessions(), s.notificationIndex()),
+		"sessions": s.publicSessions(sessions, s.notificationIndex(), sessionTitles(sessions)),
 	})
 }
 
@@ -224,7 +239,7 @@ func (s *Server) handleSession(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		writeJSON(w, http.StatusOK, s.publicSession(session, s.notificationIndex()[sessionID]))
+		writeJSON(w, http.StatusOK, s.publicSession(session, s.notificationIndex()[sessionID], sessionTitles([]model.SessionSnapshot{session})[sessionID]))
 	case len(parts) == 2 && parts[1] == "continue" && r.Method == http.MethodPost:
 		s.handleSessionContinue(w, r, parts[0])
 	default:
@@ -312,11 +327,14 @@ func (s *Server) decorateSnapshot(snapshot model.StatusSnapshot) model.StatusSna
 
 func (s *Server) publicStatus(snapshot model.StatusSnapshot) publicStatus {
 	notifications := s.notificationIndex()
+	titles := sessionTitles(snapshot.Sessions)
 	activeTitle := ""
-	if snapshot.ActiveSessionID != "" {
-		if session, ok := s.store.Session(snapshot.ActiveSessionID); ok {
-			activeTitle = sessionDisplayTitle(session)
-		}
+	activeCompactTitle := ""
+	activeMicroTitle := ""
+	if title, ok := titles[snapshot.ActiveSessionID]; ok {
+		activeTitle = title.Display
+		activeCompactTitle = title.Compact
+		activeMicroTitle = title.Micro
 	}
 
 	return publicStatus{
@@ -325,33 +343,42 @@ func (s *Server) publicStatus(snapshot model.StatusSnapshot) publicStatus {
 		OverallStateDetail:        snapshot.OverallStateDetail,
 		ActiveSessionID:           snapshot.ActiveSessionID,
 		ActiveSessionDisplayTitle: activeTitle,
+		ActiveSessionCompactTitle: activeCompactTitle,
+		ActiveSessionMicroTitle:   activeMicroTitle,
 		SessionsCount:             len(snapshot.Sessions),
-		Sessions:                  s.publicSessions(snapshot.Sessions, notifications),
+		Sessions:                  s.publicSessions(snapshot.Sessions, notifications, titles),
 	}
 }
 
-func (s *Server) publicSessions(sessions []model.SessionSnapshot, notifications map[string]model.NotificationSnapshot) []publicSession {
+func (s *Server) publicSessions(sessions []model.SessionSnapshot, notifications map[string]model.NotificationSnapshot, titles map[string]sessionTitleSet) []publicSession {
 	items := make([]publicSession, 0, len(sessions))
 	for _, session := range sessions {
-		items = append(items, s.publicSession(session, notifications[session.SessionID]))
+		items = append(items, s.publicSession(session, notifications[session.SessionID], titles[session.SessionID]))
 	}
 	return items
 }
 
-func (s *Server) publicSession(session model.SessionSnapshot, notification model.NotificationSnapshot) publicSession {
+func (s *Server) publicSession(session model.SessionSnapshot, notification model.NotificationSnapshot, titles sessionTitleSet) publicSession {
+	fullSummary := sessionSummary(session)
 	item := publicSession{
 		SessionID:      session.SessionID,
 		ShortSessionID: shortSessionID(session.SessionID),
-		DisplayTitle:   sessionDisplayTitle(session),
+		DisplayTitle:   titles.Display,
+		CompactTitle:   titles.Compact,
+		MicroTitle:     titles.Micro,
 		State:          session.State,
 		StateDetail:    session.StateDetail,
 		UpdatedAt:      session.UpdatedAt,
-		Summary:        sessionSummary(session),
+		Summary:        fullSummary,
+		CompactSummary: compactSummary(fullSummary, false),
+		MicroSummary:   microSummary(fullSummary, false),
 		NeedsAttention: session.State == model.StateAttention,
 	}
 
 	if notification.ID != "" {
 		item.AttentionSummary = notification.Summary
+		item.CompactAttention = compactSummary(notification.Summary, true)
+		item.MicroAttention = microSummary(notification.Summary, true)
 		item.NeedsAttention = notification.Kind == model.NotificationAttention
 		item.CanContinue = slices.Contains(notification.Actions, model.NotificationActionContinue)
 		if item.CanContinue {
@@ -433,7 +460,7 @@ func (s *Server) handleSessionContinue(w http.ResponseWriter, r *http.Request, s
 	writeJSON(w, http.StatusOK, map[string]any{
 		"ok":      true,
 		"message": "continue sent",
-		"session": s.publicSession(session, model.NotificationSnapshot{}),
+		"session": s.publicSession(session, model.NotificationSnapshot{}, sessionTitles([]model.SessionSnapshot{session})[session.SessionID]),
 		"status":  s.publicStatus(s.decorateSnapshot(s.store.Snapshot())),
 	})
 }
@@ -471,16 +498,45 @@ func shortSessionID(value string) string {
 	return value[:8]
 }
 
-func sessionDisplayTitle(session model.SessionSnapshot) string {
-	if value := strings.TrimSpace(session.LastUserPromptPreview); value != "" {
-		return value
+func sessionTitles(sessions []model.SessionSnapshot) map[string]sessionTitleSet {
+	baseCounts := make(map[string]int, len(sessions))
+	baseBySession := make(map[string]string, len(sessions))
+	for _, session := range sessions {
+		base := workspaceBaseTitle(session)
+		baseBySession[session.SessionID] = base
+		if base != "" {
+			baseCounts[base]++
+		}
 	}
-	if value := strings.TrimSpace(session.LastAssistantMessage); value != "" {
-		return value
+
+	out := make(map[string]sessionTitleSet, len(sessions))
+	for _, session := range sessions {
+		base := baseBySession[session.SessionID]
+		short := shortSessionID(session.SessionID)
+		display := base
+		compact := compactTitle(base)
+		micro := microTitle(base)
+
+		if base == "" {
+			display = short
+			compact = short
+			micro = short
+		} else if baseCounts[base] > 1 && short != "" {
+			display = titleWithSuffix(base, short, 999)
+			compact = titleWithSuffix(base, short, 42)
+			micro = titleWithSuffix(base, short, 24)
+		}
+
+		out[session.SessionID] = sessionTitleSet{
+			Display: display,
+			Compact: compact,
+			Micro:   micro,
+		}
 	}
-	if value := strings.TrimSpace(session.LastBashCommand); value != "" {
-		return value
-	}
+	return out
+}
+
+func workspaceBaseTitle(session model.SessionSnapshot) string {
 	if value := strings.TrimSpace(session.CWD); value != "" {
 		base := strings.TrimSpace(filepath.Base(value))
 		if base != "" && base != "." && base != "/" {
@@ -502,6 +558,137 @@ func firstNonEmpty(values ...string) string {
 		}
 	}
 	return ""
+}
+
+func compactTitle(value string) string {
+	value = normalizeInlineWhitespace(value)
+	if value == "" {
+		return ""
+	}
+	return clipHead(value, 42)
+}
+
+func microTitle(value string) string {
+	value = normalizeInlineWhitespace(value)
+	if value == "" {
+		return ""
+	}
+	return clipHead(value, 24)
+}
+
+func titleWithSuffix(base, suffix string, limit int) string {
+	base = normalizeInlineWhitespace(base)
+	suffix = normalizeInlineWhitespace(suffix)
+	if base == "" {
+		return clipHead(suffix, limit)
+	}
+	if suffix == "" {
+		return clipHead(base, limit)
+	}
+	if limit <= 0 {
+		return ""
+	}
+	combined := base + " · " + suffix
+	runes := []rune(combined)
+	if len(runes) <= limit {
+		return combined
+	}
+
+	suffixPart := " · " + suffix
+	suffixRunes := []rune(suffixPart)
+	if len(suffixRunes) >= limit {
+		return clipTail(suffix, limit)
+	}
+
+	baseLimit := limit - len(suffixRunes)
+	return clipHead(base, baseLimit) + suffixPart
+}
+
+func compactSummary(value string, preferTail bool) string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return ""
+	}
+	if preferTail {
+		if section := lastNonEmptySection(value); section != "" {
+			return clipHead(normalizeInlineWhitespace(section), 72)
+		}
+		if line := lastNonEmptyLine(value); line != "" {
+			return clipHead(normalizeInlineWhitespace(line), 72)
+		}
+		return clipTail(normalizeInlineWhitespace(value), 72)
+	}
+	return clipHead(normalizeInlineWhitespace(value), 72)
+}
+
+func microSummary(value string, preferTail bool) string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return ""
+	}
+	if preferTail {
+		if section := lastNonEmptySection(value); section != "" {
+			return clipHead(normalizeInlineWhitespace(section), 44)
+		}
+		if line := lastNonEmptyLine(value); line != "" {
+			return clipHead(normalizeInlineWhitespace(line), 44)
+		}
+		return clipTail(normalizeInlineWhitespace(value), 44)
+	}
+	return clipHead(normalizeInlineWhitespace(value), 44)
+}
+
+func normalizeInlineWhitespace(value string) string {
+	return strings.Join(strings.Fields(strings.TrimSpace(value)), " ")
+}
+
+func clipHead(value string, limit int) string {
+	runes := []rune(value)
+	if len(runes) <= limit {
+		return value
+	}
+	if limit <= 1 {
+		return string(runes[:limit])
+	}
+	return string(runes[:limit-1]) + "…"
+}
+
+func clipTail(value string, limit int) string {
+	runes := []rune(value)
+	if len(runes) <= limit {
+		return value
+	}
+	if limit <= 1 {
+		return string(runes[len(runes)-limit:])
+	}
+	return "…" + string(runes[len(runes)-(limit-1):])
+}
+
+func lastNonEmptySection(value string) string {
+	for _, item := range splitKeepOrder(value, "\n\n") {
+		if strings.TrimSpace(item) != "" {
+			return strings.TrimSpace(item)
+		}
+	}
+	return ""
+}
+
+func lastNonEmptyLine(value string) string {
+	for _, item := range splitKeepOrder(value, "\n") {
+		if strings.TrimSpace(item) != "" {
+			return strings.TrimSpace(item)
+		}
+	}
+	return ""
+}
+
+func splitKeepOrder(value, separator string) []string {
+	raw := strings.Split(value, separator)
+	items := make([]string, 0, len(raw))
+	for i := len(raw) - 1; i >= 0; i-- {
+		items = append(items, raw[i])
+	}
+	return items
 }
 
 func writeJSON(w http.ResponseWriter, status int, value any) {

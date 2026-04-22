@@ -127,8 +127,8 @@ func Default() Config {
 			RequireLoopback: true,
 		},
 		State: StateConfig{
-			AttentionHoldMS: 15000,
-			IdleFallbackMS:  10000,
+			AttentionHoldMS: 0,
+			IdleFallbackMS:  0,
 		},
 		Transcript: TranscriptConfig{
 			Enabled:        true,
@@ -178,12 +178,6 @@ func applyDefaults(cfg *Config) {
 	}
 	if cfg.Listen.Port == 0 {
 		cfg.Listen.Port = 8787
-	}
-	if cfg.State.AttentionHoldMS <= 0 {
-		cfg.State.AttentionHoldMS = 15000
-	}
-	if cfg.State.IdleFallbackMS <= 0 {
-		cfg.State.IdleFallbackMS = 10000
 	}
 	if cfg.HookClient.RequestTimeoutMS <= 0 {
 		cfg.HookClient.RequestTimeoutMS = 1500

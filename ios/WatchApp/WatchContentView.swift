@@ -13,7 +13,7 @@ struct WatchContentView: View {
                     VStack(alignment: .leading, spacing: 2) {
                         Text(model.snapshot.overallState.displayName)
                             .font(.headline)
-                        Text(model.snapshot.activeSessionDisplayTitle ?? model.snapshot.activeSessionID ?? "No active session")
+                        Text(model.snapshot.activeSessionMicroTitle ?? model.snapshot.activeSessionCompactTitle ?? model.snapshot.activeSessionDisplayTitle ?? model.snapshot.activeSessionID ?? "No active session")
                             .font(.caption2)
                             .foregroundStyle(.secondary)
                     }
@@ -42,15 +42,15 @@ struct WatchContentView: View {
                             HStack(alignment: .top) {
                                 Text(session.state.face)
                                 VStack(alignment: .leading, spacing: 2) {
-                                    Text(session.listTitle)
+                                    Text(session.watchTitle)
                                         .font(.headline)
                                     Text(session.shortSessionID ?? CodexFormatters.shortSessionLabel(session.sessionID))
                                         .font(.caption2)
                                         .foregroundStyle(.secondary)
                                 }
                             }
-                            if !session.assistantSummary.isEmpty {
-                                Text(session.assistantSummary)
+                            if !session.watchSummary.isEmpty {
+                                Text(session.watchSummary)
                                     .font(.caption)
                             }
                             HStack {

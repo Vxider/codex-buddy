@@ -87,12 +87,18 @@ struct CodexSessionSummary: Codable, Identifiable, Hashable {
     let sessionID: String
     let shortSessionID: String?
     let displayTitle: String?
+    let compactTitle: String?
+    let microTitle: String?
     let state: CodexState
     let stateDetail: String?
     let updatedAt: Date?
     let summary: String?
+    let compactSummary: String?
+    let microSummary: String?
     let needsAttention: Bool
     let attentionSummary: String?
+    let compactAttentionSummary: String?
+    let microAttentionSummary: String?
     let canContinue: Bool
     let continueAction: CodexContinueAction?
 
@@ -100,19 +106,28 @@ struct CodexSessionSummary: Codable, Identifiable, Hashable {
         case sessionID = "session_id"
         case shortSessionID = "short_session_id"
         case displayTitle = "display_title"
+        case compactTitle = "compact_title"
+        case microTitle = "micro_title"
         case state
         case stateDetail = "state_detail"
         case updatedAt = "updated_at"
         case summary
+        case compactSummary = "compact_summary"
+        case microSummary = "micro_summary"
         case needsAttention = "needs_attention"
         case attentionSummary = "attention_summary"
+        case compactAttentionSummary = "compact_attention_summary"
+        case microAttentionSummary = "micro_attention_summary"
         case canContinue = "can_continue"
         case continueAction = "continue_action"
     }
 
     var id: String { sessionID }
 
-    var listTitle: String {
+    var phoneTitle: String {
+        if let compactTitle, !compactTitle.isEmpty {
+            return compactTitle
+        }
         if let displayTitle, !displayTitle.isEmpty {
             return displayTitle
         }
@@ -122,11 +137,40 @@ struct CodexSessionSummary: Codable, Identifiable, Hashable {
         return sessionID
     }
 
-    var assistantSummary: String {
+    var watchTitle: String {
+        if let microTitle, !microTitle.isEmpty {
+            return microTitle
+        }
+        return phoneTitle
+    }
+
+    var phoneSummary: String {
+        if let compactAttentionSummary, !compactAttentionSummary.isEmpty {
+            return compactAttentionSummary
+        }
         if let attentionSummary, !attentionSummary.isEmpty {
             return attentionSummary
         }
+        if let compactSummary, !compactSummary.isEmpty {
+            return compactSummary
+        }
         return summary ?? ""
+    }
+
+    var watchSummary: String {
+        if let microAttentionSummary, !microAttentionSummary.isEmpty {
+            return microAttentionSummary
+        }
+        if let compactAttentionSummary, !compactAttentionSummary.isEmpty {
+            return compactAttentionSummary
+        }
+        if let attentionSummary, !attentionSummary.isEmpty {
+            return attentionSummary
+        }
+        if let microSummary, !microSummary.isEmpty {
+            return microSummary
+        }
+        return phoneSummary
     }
 }
 
@@ -136,6 +180,8 @@ struct CodexStatusSnapshot: Codable, Hashable {
     let overallStateDetail: String?
     let activeSessionID: String?
     let activeSessionDisplayTitle: String?
+    let activeSessionCompactTitle: String?
+    let activeSessionMicroTitle: String?
     let sessionsCount: Int
     let sessions: [CodexSessionSummary]
 
@@ -145,6 +191,8 @@ struct CodexStatusSnapshot: Codable, Hashable {
         case overallStateDetail = "overall_state_detail"
         case activeSessionID = "active_session_id"
         case activeSessionDisplayTitle = "active_session_display_title"
+        case activeSessionCompactTitle = "active_session_compact_title"
+        case activeSessionMicroTitle = "active_session_micro_title"
         case sessionsCount = "sessions_count"
         case sessions
     }
@@ -155,6 +203,8 @@ struct CodexStatusSnapshot: Codable, Hashable {
         overallStateDetail: nil,
         activeSessionID: nil,
         activeSessionDisplayTitle: nil,
+        activeSessionCompactTitle: nil,
+        activeSessionMicroTitle: nil,
         sessionsCount: 0,
         sessions: []
     )

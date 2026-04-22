@@ -12,7 +12,7 @@ import (
 )
 
 func TestApplyIngestTransitions(t *testing.T) {
-	st := New(20*time.Millisecond, 50*time.Millisecond, log.New(io.Discard, "", 0))
+	st := New(0, 0, log.New(io.Discard, "", 0))
 	now := time.Now().UTC()
 
 	snapshot := st.ApplyIngest(model.IngestRequest{
@@ -39,13 +39,12 @@ func TestApplyIngestTransitions(t *testing.T) {
 		t.Fatalf("expected attention after stop, got %s", snapshot.OverallState)
 	}
 
-	time.Sleep(30 * time.Millisecond)
 	session, ok := st.Session("sess-1")
 	if !ok {
 		t.Fatalf("expected session")
 	}
-	if session.State != model.StateIdle {
-		t.Fatalf("expected attention to decay to idle, got %s", session.State)
+	if session.State != model.StateAttention {
+		t.Fatalf("expected attention to remain active, got %s", session.State)
 	}
 }
 
@@ -75,8 +74,8 @@ func TestApplyTranscriptUpdateEnrichesSession(t *testing.T) {
 	}
 }
 
-func TestRunningFallsBackToIdle(t *testing.T) {
-	st := New(time.Second, 20*time.Millisecond, log.New(io.Discard, "", 0))
+func TestRunningDoesNotFallBackToIdleByDefault(t *testing.T) {
+	st := New(0, 0, log.New(io.Discard, "", 0))
 	now := time.Now().UTC()
 
 	st.ApplyIngest(model.IngestRequest{
@@ -92,8 +91,60 @@ func TestRunningFallsBackToIdle(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected session")
 	}
+	if session.State != model.StateRunning {
+		t.Fatalf("expected running session to remain running, got %s", session.State)
+	}
+}
+
+func TestAttentionCanStillDecayWhenConfigured(t *testing.T) {
+	st := New(20*time.Millisecond, 0, log.New(io.Discard, "", 0))
+	now := time.Now().UTC()
+
+	st.ApplyIngest(model.IngestRequest{
+		EventName:  "session-start",
+		ReceivedAt: now,
+		Payload: model.HookPayload{
+			SessionID: "sess-4",
+		},
+	})
+	st.ApplyIngest(model.IngestRequest{
+		EventName:  "stop",
+		ReceivedAt: now.Add(time.Second),
+		Payload: model.HookPayload{
+			SessionID:            "sess-4",
+			LastAssistantMessage: "done",
+		},
+	})
+
+	time.Sleep(30 * time.Millisecond)
+	session, ok := st.Session("sess-4")
+	if !ok {
+		t.Fatalf("expected session")
+	}
 	if session.State != model.StateIdle {
-		t.Fatalf("expected stale running session to fall back to idle, got %s", session.State)
+		t.Fatalf("expected configured attention timeout to decay to idle, got %s", session.State)
+	}
+}
+
+func TestRunningCanStillFallBackWhenConfigured(t *testing.T) {
+	st := New(0, 20*time.Millisecond, log.New(io.Discard, "", 0))
+	now := time.Now().UTC()
+
+	st.ApplyIngest(model.IngestRequest{
+		EventName:  "user-prompt-submit",
+		ReceivedAt: now,
+		Payload: model.HookPayload{
+			SessionID: "sess-5",
+		},
+	})
+
+	time.Sleep(30 * time.Millisecond)
+	session, ok := st.Session("sess-5")
+	if !ok {
+		t.Fatalf("expected session")
+	}
+	if session.State != model.StateIdle {
+		t.Fatalf("expected configured running fallback to decay to idle, got %s", session.State)
 	}
 }
 
@@ -109,5 +160,17 @@ func TestPreviewKeepsUTF8ValidForMultibyteText(t *testing.T) {
 	}
 	if strings.ContainsRune(output, '\uFFFD') {
 		t.Fatalf("expected preview without replacement rune, got %q", output)
+	}
+}
+
+func TestPreviewAssistantPrefersTailContext(t *testing.T) {
+	input := strings.Repeat("setup details ", 20) + "\n\nApproval required: overwrite package-lock.json and continue."
+	output := previewAssistant(input)
+
+	if !strings.Contains(output, "Approval required") {
+		t.Fatalf("expected assistant preview to keep the tail approval text, got %q", output)
+	}
+	if strings.Contains(output, "setup details setup details setup details setup details") {
+		t.Fatalf("expected assistant preview to avoid the long leading setup text, got %q", output)
 	}
 }

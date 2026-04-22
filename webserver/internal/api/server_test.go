@@ -7,6 +7,7 @@ import (
 	"log"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -47,7 +48,7 @@ func TestStatusIncludesAttentionSummaryAndContinueAction(t *testing.T) {
 	if out.OverallState != model.StateAttention {
 		t.Fatalf("expected attention overall state, got %s", out.OverallState)
 	}
-	if out.ActiveSessionDisplayTitle != "Refactor sidebar" {
+	if out.ActiveSessionDisplayTitle != "sidebar" {
 		t.Fatalf("unexpected active display title: %q", out.ActiveSessionDisplayTitle)
 	}
 	if len(out.Sessions) != 1 {
@@ -55,11 +56,23 @@ func TestStatusIncludesAttentionSummaryAndContinueAction(t *testing.T) {
 	}
 
 	session := out.Sessions[0]
-	if session.DisplayTitle != "Refactor sidebar" {
+	if session.DisplayTitle != "sidebar" {
 		t.Fatalf("unexpected display title: %q", session.DisplayTitle)
+	}
+	if session.CompactTitle != "sidebar" {
+		t.Fatalf("unexpected compact title: %q", session.CompactTitle)
+	}
+	if session.MicroTitle != "sidebar" {
+		t.Fatalf("unexpected micro title: %q", session.MicroTitle)
 	}
 	if session.AttentionSummary != "Need confirmation before overwriting files" {
 		t.Fatalf("unexpected attention summary: %q", session.AttentionSummary)
+	}
+	if session.CompactAttention != "Need confirmation before overwriting files" {
+		t.Fatalf("unexpected compact attention summary: %q", session.CompactAttention)
+	}
+	if session.MicroAttention != "Need confirmation before overwriting files" {
+		t.Fatalf("unexpected micro attention summary: %q", session.MicroAttention)
 	}
 	if !session.CanContinue {
 		t.Fatalf("expected session to be continuable")
@@ -72,6 +85,291 @@ func TestStatusIncludesAttentionSummaryAndContinueAction(t *testing.T) {
 	}
 	if session.ContinueAction.ActionToken == "" {
 		t.Fatalf("expected action token")
+	}
+}
+
+func TestStatusTitleDoesNotReuseAssistantSummary(t *testing.T) {
+	st := store.New(30*time.Second, 0, log.New(io.Discard, "", 0))
+	now := time.Date(2026, 4, 23, 12, 0, 0, 0, time.UTC)
+
+	st.ApplyIngest(model.IngestRequest{
+		EventName:  "session-start",
+		ReceivedAt: now,
+		Payload: model.HookPayload{
+			SessionID: "sess-dup",
+			CWD:       "/repo/payments",
+		},
+	})
+	st.ApplyIngest(model.IngestRequest{
+		EventName:  "stop",
+		ReceivedAt: now.Add(time.Second),
+		Payload: model.HookPayload{
+			SessionID:            "sess-dup",
+			LastAssistantMessage: "Approval required before editing billing rules",
+			TmuxPane:             "%8",
+		},
+	})
+
+	server := NewServer(config.Config{}, st, nil, &stubContinueExecutor{}, log.New(io.Discard, "", 0))
+	req := httptest.NewRequest(http.MethodGet, "/v1/status", nil)
+	resp := httptest.NewRecorder()
+	server.Handler().ServeHTTP(resp, req)
+
+	if resp.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", resp.Code)
+	}
+
+	var out publicStatus
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		t.Fatalf("decode status: %v", err)
+	}
+	if len(out.Sessions) != 1 {
+		t.Fatalf("expected one session, got %d", len(out.Sessions))
+	}
+
+	session := out.Sessions[0]
+	if session.DisplayTitle != "payments" {
+		t.Fatalf("expected cwd-derived title, got %q", session.DisplayTitle)
+	}
+	if session.CompactTitle != "payments" {
+		t.Fatalf("expected compact cwd-derived title, got %q", session.CompactTitle)
+	}
+	if session.MicroTitle != "payments" {
+		t.Fatalf("expected micro cwd-derived title, got %q", session.MicroTitle)
+	}
+	if session.AttentionSummary != "Approval required before editing billing rules" {
+		t.Fatalf("unexpected attention summary: %q", session.AttentionSummary)
+	}
+}
+
+func TestStatusTitleDoesNotUseBashCommandFallback(t *testing.T) {
+	st := store.New(30*time.Second, 0, log.New(io.Discard, "", 0))
+	now := time.Date(2026, 4, 23, 12, 10, 0, 0, time.UTC)
+
+	st.ApplyIngest(model.IngestRequest{
+		EventName:  "session-start",
+		ReceivedAt: now,
+		Payload: model.HookPayload{
+			SessionID: "sess-bash",
+			CWD:       "/repo/payments",
+		},
+	})
+	st.ApplyTranscriptUpdate(model.TranscriptUpdate{
+		SessionID:       "sess-bash",
+		LastBashCommand: "npm test -- payments",
+		UpdatedAt:       now.Add(time.Second),
+	})
+
+	server := NewServer(config.Config{}, st, nil, &stubContinueExecutor{}, log.New(io.Discard, "", 0))
+	req := httptest.NewRequest(http.MethodGet, "/v1/status", nil)
+	resp := httptest.NewRecorder()
+	server.Handler().ServeHTTP(resp, req)
+
+	if resp.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", resp.Code)
+	}
+
+	var out publicStatus
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		t.Fatalf("decode status: %v", err)
+	}
+	if len(out.Sessions) != 1 {
+		t.Fatalf("expected one session, got %d", len(out.Sessions))
+	}
+
+	session := out.Sessions[0]
+	if session.DisplayTitle != "payments" {
+		t.Fatalf("expected cwd title instead of bash command, got %q", session.DisplayTitle)
+	}
+	if session.CompactTitle != "payments" {
+		t.Fatalf("expected compact cwd title instead of bash command, got %q", session.CompactTitle)
+	}
+	if session.MicroTitle != "payments" {
+		t.Fatalf("expected micro cwd title instead of bash command, got %q", session.MicroTitle)
+	}
+}
+
+func TestStatusTitleSkipsCommandLikePrompt(t *testing.T) {
+	st := store.New(30*time.Second, 0, log.New(io.Discard, "", 0))
+	now := time.Date(2026, 4, 23, 12, 20, 0, 0, time.UTC)
+
+	st.ApplyIngest(model.IngestRequest{
+		EventName:  "session-start",
+		ReceivedAt: now,
+		Payload: model.HookPayload{
+			SessionID: "sess-prompt-cmd",
+			CWD:       "/repo/payments",
+		},
+	})
+	st.ApplyIngest(model.IngestRequest{
+		EventName:  "user-prompt-submit",
+		ReceivedAt: now.Add(time.Second),
+		Payload: model.HookPayload{
+			SessionID: "sess-prompt-cmd",
+			Prompt:    "npm test -- payments",
+		},
+	})
+
+	server := NewServer(config.Config{}, st, nil, &stubContinueExecutor{}, log.New(io.Discard, "", 0))
+	req := httptest.NewRequest(http.MethodGet, "/v1/status", nil)
+	resp := httptest.NewRecorder()
+	server.Handler().ServeHTTP(resp, req)
+
+	if resp.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", resp.Code)
+	}
+
+	var out publicStatus
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		t.Fatalf("decode status: %v", err)
+	}
+	if len(out.Sessions) != 1 {
+		t.Fatalf("expected one session, got %d", len(out.Sessions))
+	}
+
+	session := out.Sessions[0]
+	if session.DisplayTitle != "payments" {
+		t.Fatalf("expected cwd title instead of command-like prompt, got %q", session.DisplayTitle)
+	}
+}
+
+func TestStatusTitlesDisambiguateDuplicateWorkspaces(t *testing.T) {
+	st := store.New(30*time.Second, 0, log.New(io.Discard, "", 0))
+	now := time.Date(2026, 4, 23, 12, 25, 0, 0, time.UTC)
+
+	st.ApplyIngest(model.IngestRequest{
+		EventName:  "session-start",
+		ReceivedAt: now,
+		Payload: model.HookPayload{
+			SessionID: "sess-dup-a-12345678",
+			CWD:       "/repo/payments",
+		},
+	})
+	st.ApplyIngest(model.IngestRequest{
+		EventName:  "session-start",
+		ReceivedAt: now.Add(time.Second),
+		Payload: model.HookPayload{
+			SessionID: "sess-dup-b-87654321",
+			CWD:       "/another/payments",
+		},
+	})
+
+	server := NewServer(config.Config{}, st, nil, &stubContinueExecutor{}, log.New(io.Discard, "", 0))
+	req := httptest.NewRequest(http.MethodGet, "/v1/status", nil)
+	resp := httptest.NewRecorder()
+	server.Handler().ServeHTTP(resp, req)
+
+	if resp.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", resp.Code)
+	}
+
+	var out publicStatus
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		t.Fatalf("decode status: %v", err)
+	}
+	if len(out.Sessions) != 2 {
+		t.Fatalf("expected two sessions, got %d", len(out.Sessions))
+	}
+
+	for _, session := range out.Sessions {
+		if !strings.Contains(session.DisplayTitle, "payments") {
+			t.Fatalf("expected workspace name in display title, got %q", session.DisplayTitle)
+		}
+		if !strings.Contains(session.DisplayTitle, "·") {
+			t.Fatalf("expected duplicate workspace title to include suffix, got %q", session.DisplayTitle)
+		}
+		if !strings.Contains(session.CompactTitle, "·") {
+			t.Fatalf("expected compact duplicate workspace title to include suffix, got %q", session.CompactTitle)
+		}
+	}
+}
+
+func TestStatusIncludesCompactMobileFields(t *testing.T) {
+	st := store.New(30*time.Second, 0, log.New(io.Discard, "", 0))
+	now := time.Date(2026, 4, 23, 12, 30, 0, 0, time.UTC)
+
+	st.ApplyIngest(model.IngestRequest{
+		EventName:  "session-start",
+		ReceivedAt: now,
+		Payload: model.HookPayload{
+			SessionID: "sess-mobile",
+			CWD:       "/repo/payments",
+		},
+	})
+	st.ApplyIngest(model.IngestRequest{
+		EventName:  "user-prompt-submit",
+		ReceivedAt: now.Add(time.Second),
+		Payload: model.HookPayload{
+			SessionID: "sess-mobile",
+			Prompt:    "Refactor the payment approval flow to separate the fraud review copy from the final customer-facing step.",
+		},
+	})
+	st.ApplyIngest(model.IngestRequest{
+		EventName:  "stop",
+		ReceivedAt: now.Add(2 * time.Second),
+		Payload: model.HookPayload{
+			SessionID:            "sess-mobile",
+			LastAssistantMessage: "I reviewed the flow and found the safest next step.\n\nApproval required before overwriting billing copy and continuing the refactor.",
+			TmuxPane:             "%9",
+		},
+	})
+
+	server := NewServer(config.Config{}, st, nil, &stubContinueExecutor{}, log.New(io.Discard, "", 0))
+	req := httptest.NewRequest(http.MethodGet, "/v1/status", nil)
+	resp := httptest.NewRecorder()
+	server.Handler().ServeHTTP(resp, req)
+
+	if resp.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", resp.Code)
+	}
+
+	var out publicStatus
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		t.Fatalf("decode status: %v", err)
+	}
+	if out.ActiveSessionCompactTitle == "" {
+		t.Fatalf("expected active compact title")
+	}
+	if out.ActiveSessionMicroTitle == "" {
+		t.Fatalf("expected active micro title")
+	}
+	if len(out.Sessions) != 1 {
+		t.Fatalf("expected one session, got %d", len(out.Sessions))
+	}
+
+	session := out.Sessions[0]
+	if session.CompactTitle == "" {
+		t.Fatalf("expected compact title")
+	}
+	if len([]rune(session.CompactTitle)) > 42 {
+		t.Fatalf("expected compact title to be short, got %q", session.CompactTitle)
+	}
+	if session.DisplayTitle != "payments" {
+		t.Fatalf("expected workspace display title, got %q", session.DisplayTitle)
+	}
+	if session.MicroTitle == "" {
+		t.Fatalf("expected micro title")
+	}
+	if len([]rune(session.MicroTitle)) > 24 {
+		t.Fatalf("expected micro title to be very short, got %q", session.MicroTitle)
+	}
+	if session.CompactAttention == "" {
+		t.Fatalf("expected compact attention summary")
+	}
+	if !strings.Contains(session.CompactAttention, "Approval required") {
+		t.Fatalf("expected compact attention summary to preserve tail context, got %q", session.CompactAttention)
+	}
+	if len([]rune(session.CompactAttention)) > 72 {
+		t.Fatalf("expected compact attention summary to be short, got %q", session.CompactAttention)
+	}
+	if session.MicroAttention == "" {
+		t.Fatalf("expected micro attention summary")
+	}
+	if !strings.Contains(session.MicroAttention, "Approval required") {
+		t.Fatalf("expected micro attention summary to preserve tail context, got %q", session.MicroAttention)
+	}
+	if len([]rune(session.MicroAttention)) > 44 {
+		t.Fatalf("expected micro attention summary to be very short, got %q", session.MicroAttention)
 	}
 }
 

@@ -72,7 +72,7 @@ struct PhoneContentView: View {
                 VStack(alignment: .leading, spacing: 4) {
                     Text(model.snapshot.overallState.displayName)
                         .font(.headline)
-                    Text(model.snapshot.activeSessionDisplayTitle ?? model.snapshot.activeSessionID ?? "No active session")
+                    Text(model.snapshot.activeSessionCompactTitle ?? model.snapshot.activeSessionDisplayTitle ?? model.snapshot.activeSessionID ?? "No active session")
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
                     Text("Updated \(CodexFormatters.shortTime(model.snapshot.serverTime))")
@@ -98,7 +98,7 @@ struct PhoneContentView: View {
                     VStack(alignment: .leading, spacing: 8) {
                         HStack(alignment: .top) {
                             VStack(alignment: .leading, spacing: 4) {
-                                Text(session.listTitle)
+                                Text(session.phoneTitle)
                                     .font(.headline)
                                 Text(session.shortSessionID ?? CodexFormatters.shortSessionLabel(session.sessionID))
                                     .font(.caption)
@@ -111,8 +111,8 @@ struct PhoneContentView: View {
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
                         }
-                        if !session.assistantSummary.isEmpty {
-                            Text(session.assistantSummary)
+                        if !session.phoneSummary.isEmpty {
+                            Text(session.phoneSummary)
                                 .font(.subheadline)
                         }
                         HStack {
