@@ -69,7 +69,7 @@ func Run(ctx context.Context, cfg config.UConsoleConfig, logger *log.Logger) err
 		logger:     logger,
 		client:     client,
 		lastStatus: offlineStatus(),
-		statusLine: "正在连接 codex-buddy",
+		statusLine: "Connecting to codex-buddy",
 	}
 
 	gui.fyneApp = app.NewWithID("github.com.vxider.codex-buddy.uconsole")
@@ -127,15 +127,15 @@ func (a *App) buildUI() fyne.CanvasObject {
 
 	a.titleLabel = widget.NewLabelWithStyle("Codex companion", fyne.TextAlignLeading, fyne.TextStyle{Bold: true})
 	a.titleLabel.Wrapping = fyne.TextWrapWord
-	a.summaryLabel = widget.NewLabel("等待连接 codex-buddy 服务。")
+	a.summaryLabel = widget.NewLabel("Waiting for the codex-buddy service.")
 	a.summaryLabel.Wrapping = fyne.TextWrapWord
 
 	a.activeLabel = widget.NewLabel("-")
 	a.updatedLabel = widget.NewLabel("-")
-	a.connectionLabel = widget.NewLabel("未连接")
-	a.statusLabel = widget.NewLabel("正在连接 codex-buddy")
+	a.connectionLabel = widget.NewLabel("Disconnected")
+	a.statusLabel = widget.NewLabel("Connecting to codex-buddy")
 
-	stats := widget.NewCard("当前会话", "", container.NewVBox(
+	stats := widget.NewCard("Current Session", "", container.NewVBox(
 		statRow("Active Session", a.activeLabel),
 		statRow("Updated", a.updatedLabel),
 		statRow("Connection", a.connectionLabel),
@@ -151,15 +151,15 @@ func (a *App) buildUI() fyne.CanvasObject {
 	))
 
 	a.cardTitle = widget.NewLabelWithStyle("Primary Card", fyne.TextAlignLeading, fyne.TextStyle{Bold: true})
-	a.cardSession = widget.NewLabel("暂无待确认通知")
-	a.cardMeta = widget.NewLabel("复杂情况请回 terminal 处理。")
-	a.cardSummary = widget.NewLabel("Codex 运行结束后，这里会显示一条压缩后的结果预览。")
+	a.cardSession = widget.NewLabel("No pending notification")
+	a.cardMeta = widget.NewLabel("Handle complex cases in the terminal.")
+	a.cardSummary = widget.NewLabel("A compact result preview will appear here when Codex finishes a run.")
 	a.cardSummary.Wrapping = fyne.TextWrapWord
 	a.cardSummary.TextStyle = fyne.TextStyle{Bold: true}
 
-	a.ackButton = widget.NewButton("已读 (A)", func() { go a.ackPrimary() })
-	a.continueButton = widget.NewButton("继续", func() { a.confirmContinue() })
-	a.refreshButton = widget.NewButtonWithIcon("刷新", theme.ViewRefreshIcon(), func() { go a.refreshNow(context.Background()) })
+	a.ackButton = widget.NewButton("Acknowledge (A)", func() { go a.ackPrimary() })
+	a.continueButton = widget.NewButton("Continue", func() { a.confirmContinue() })
+	a.refreshButton = widget.NewButtonWithIcon("Refresh", theme.ViewRefreshIcon(), func() { go a.refreshNow(context.Background()) })
 
 	cardBody := container.NewVBox(
 		a.cardTitle,
@@ -169,11 +169,11 @@ func (a *App) buildUI() fyne.CanvasObject {
 		a.cardMeta,
 		container.NewHBox(a.ackButton, a.continueButton, layout.NewSpacer(), a.refreshButton),
 	)
-	card := widget.NewCard("通知卡片", "", cardBody)
+	card := widget.NewCard("Notification Card", "", cardBody)
 
-	a.sessionList = widget.NewLabel("暂无活跃 session")
+	a.sessionList = widget.NewLabel("No active sessions")
 	a.sessionList.Wrapping = fyne.TextWrapWord
-	sidebar := widget.NewCard("会话概览", "", a.sessionList)
+	sidebar := widget.NewCard("Session Overview", "", a.sessionList)
 
 	split := container.NewHSplit(card, sidebar)
 	split.SetOffset(0.68)
@@ -236,7 +236,7 @@ func (a *App) startSync(ctx context.Context) {
 			return
 		}
 		if err != nil {
-			a.setStatusLine("实时流断开，正在重连: " + err.Error())
+			a.setStatusLine("Live stream disconnected, reconnecting: " + err.Error())
 		}
 		select {
 		case <-ctx.Done():
@@ -284,7 +284,7 @@ func (a *App) applyState(status StatusResponse, notifications []NotificationResp
 		a.statusLine = err.Error()
 	} else {
 		a.lastError = ""
-		a.statusLine = "已连接"
+		a.statusLine = "Connected"
 	}
 	primary := a.primaryNotificationLocked()
 	if a.lightRunner != nil {
@@ -335,9 +335,9 @@ func (a *App) render() {
 
 	a.cardTitle.SetText(cardTitle(primary))
 	if primary == nil {
-		a.cardSession.SetText("暂无待确认通知")
-		a.cardSummary.SetText("Codex 运行结束后，这里会显示一条压缩后的结果预览。")
-		a.cardMeta.SetText("A 已读，长按键盘 C 800ms 发送继续。")
+		a.cardSession.SetText("No pending notification")
+		a.cardSummary.SetText("A compact result preview will appear here when Codex finishes a run.")
+		a.cardMeta.SetText("Press A to acknowledge, or hold C for 800ms to send continue.")
 		a.ackButton.Disable()
 		a.continueButton.Disable()
 	} else {
@@ -377,7 +377,7 @@ func (a *App) confirmContinue() {
 		return
 	}
 
-	dialog.NewConfirm("发送继续", "向当前 Codex 会话发送一次“继续 + Enter”吗？", func(ok bool) {
+	dialog.NewConfirm("Send Continue", "Send one \"continue + Enter\" action to the current Codex session?", func(ok bool) {
 		if ok {
 			go a.executeContinue(*primary)
 		}
@@ -385,12 +385,12 @@ func (a *App) confirmContinue() {
 }
 
 func (a *App) executeContinue(item NotificationResponse) {
-	a.setStatusLine("正在发送继续...")
+	a.setStatusLine("Sending continue...")
 	if err := a.client.ContinueNotification(context.Background(), item); err != nil {
 		a.setStatusLine(err.Error())
 		return
 	}
-	a.setStatusLine("继续已发送")
+	a.setStatusLine("Continue sent")
 	_ = a.refreshNow(context.Background())
 }
 
@@ -408,7 +408,7 @@ func (a *App) beginHoldContinue() {
 		return
 	}
 	a.holdActive = true
-	a.setStatusLine("继续确认中...")
+	a.setStatusLine("Waiting for continue hold confirmation...")
 	item := *primary
 	a.holdTimer = time.AfterFunc(time.Duration(a.cfg.ContinueHoldMS)*time.Millisecond, func() {
 		a.holdMu.Lock()
@@ -430,7 +430,7 @@ func (a *App) cancelHoldContinue(triggered bool) {
 		return
 	}
 	if timer.Stop() && wasActive && !triggered {
-		a.setStatusLine("已取消继续")
+		a.setStatusLine("Continue cancelled")
 	}
 }
 
@@ -468,13 +468,13 @@ func badgeStyle(state model.State) (string, color.NRGBA) {
 func titleForState(state model.State) string {
 	switch state {
 	case model.StateAttention:
-		return "需要你看一眼"
+		return "Needs your attention"
 	case model.StateError:
-		return "本轮出现错误"
+		return "This run hit an error"
 	case model.StateRunning, model.StateRunningBash:
-		return "Codex 正在工作"
+		return "Codex is working"
 	case model.StateIdle:
-		return "当前空闲"
+		return "Currently idle"
 	default:
 		return "Codex companion"
 	}
@@ -482,19 +482,19 @@ func titleForState(state model.State) string {
 
 func summaryForState(state model.State, connected bool, lastError string) string {
 	if !connected && lastError != "" {
-		return "与远端 buddy 的连接不可用: " + lastError
+		return "Connection to the remote buddy is unavailable: " + lastError
 	}
 	switch state {
 	case model.StateAttention:
-		return "任务刚完成，主卡片会显示一条压缩预览。"
+		return "A run just finished. The primary card will show a compact preview."
 	case model.StateError:
-		return "优先回 terminal 处理复杂情况。"
+		return "Handle complex or broken states in the terminal first."
 	case model.StateRunning, model.StateRunningBash:
-		return "uConsole 只做旁路提醒、继续和灯效。"
+		return "uConsole is a sidecar for alerts, continue, and LED feedback."
 	case model.StateIdle:
-		return "当前没有正在执行的任务。"
+		return "There is no active task right now."
 	default:
-		return "等待远端 codex-buddy 状态。"
+		return "Waiting for remote codex-buddy state."
 	}
 }
 
@@ -512,17 +512,17 @@ func cardTitle(primary *NotificationResponse) string {
 
 func primaryMeta(primary NotificationResponse) string {
 	if primary.Kind == model.NotificationError {
-		return "错误提醒：建议回 terminal 处理。"
+		return "Error notification: resolve it from the terminal."
 	}
 	if primary.State == model.NotificationAcked {
-		return "这条通知已读，但仍可继续。"
+		return "This notification is acknowledged, but continue is still available."
 	}
-	return "A 已读，长按键盘 C 800ms 发送继续。"
+	return "Press A to acknowledge, or hold C for 800ms to send continue."
 }
 
 func sessionListText(sessions []SessionResponse) string {
 	if len(sessions) == 0 {
-		return "暂无活跃 session"
+		return "No active sessions"
 	}
 	var lines []string
 	for _, session := range sessions {
