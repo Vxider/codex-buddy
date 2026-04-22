@@ -1,0 +1,682 @@
+package api
+
+import (
+	"encoding/json"
+	"fmt"
+	"log"
+	"net"
+	"net/http"
+	"path/filepath"
+	"slices"
+	"strings"
+	"time"
+
+	"github.com/vxider/codex-buddy/internal/config"
+	"github.com/vxider/codex-buddy/internal/model"
+	"github.com/vxider/codex-buddy/webserver/internal/control"
+	"github.com/vxider/codex-buddy/webserver/internal/store"
+	"github.com/vxider/codex-buddy/webserver/internal/transcript"
+)
+
+type Server struct {
+	cfg        config.Config
+	store      *store.Store
+	transcript *transcript.Manager
+	control    control.ContinueExecutor
+	logger     *log.Logger
+}
+
+type publicSession struct {
+	SessionID        string                `json:"session_id"`
+	ShortSessionID   string                `json:"short_session_id,omitempty"`
+	DisplayTitle     string                `json:"display_title,omitempty"`
+	State            model.State           `json:"state"`
+	StateDetail      string                `json:"state_detail,omitempty"`
+	UpdatedAt        time.Time             `json:"updated_at"`
+	Summary          string                `json:"summary,omitempty"`
+	NeedsAttention   bool                  `json:"needs_attention"`
+	AttentionSummary string                `json:"attention_summary,omitempty"`
+	CanContinue      bool                  `json:"can_continue"`
+	ContinueAction   *publicContinueAction `json:"continue_action,omitempty"`
+}
+
+type publicContinueAction struct {
+	Method      string `json:"method"`
+	Endpoint    string `json:"endpoint"`
+	ActionToken string `json:"action_token,omitempty"`
+	Label       string `json:"label,omitempty"`
+}
+
+type publicStatus struct {
+	ServerTime                time.Time       `json:"server_time"`
+	OverallState              model.State     `json:"overall_state"`
+	OverallStateDetail        string          `json:"overall_state_detail,omitempty"`
+	ActiveSessionID           string          `json:"active_session_id,omitempty"`
+	ActiveSessionDisplayTitle string          `json:"active_session_display_title,omitempty"`
+	SessionsCount             int             `json:"sessions_count"`
+	Sessions                  []publicSession `json:"sessions"`
+}
+
+type publicNotification struct {
+	ID          string                     `json:"id"`
+	SessionID   string                     `json:"session_id"`
+	Kind        model.NotificationKind     `json:"kind"`
+	State       model.NotificationState    `json:"state"`
+	Title       string                     `json:"title"`
+	Summary     string                     `json:"summary"`
+	CreatedAt   time.Time                  `json:"created_at"`
+	UpdatedAt   time.Time                  `json:"updated_at"`
+	ActionToken string                     `json:"action_token,omitempty"`
+	Actions     []model.NotificationAction `json:"actions,omitempty"`
+}
+
+func NewServer(cfg config.Config, sessionStore *store.Store, transcriptManager *transcript.Manager, executor control.ContinueExecutor, logger *log.Logger) *Server {
+	return &Server{
+		cfg:        cfg,
+		store:      sessionStore,
+		transcript: transcriptManager,
+		control:    executor,
+		logger:     logger,
+	}
+}
+
+func (s *Server) Handler() http.Handler {
+	mux := http.NewServeMux()
+
+	mux.HandleFunc("/health", s.handleHealth)
+	mux.HandleFunc("/status", s.handleDebug)
+	mux.HandleFunc("/debug/codex", s.handleCodexDebug)
+	mux.HandleFunc("/v1/status", s.handleStatus)
+	mux.HandleFunc("/v1/notifications", s.handleNotifications)
+	mux.HandleFunc("/v1/notifications/", s.handleNotificationAction)
+	mux.HandleFunc("/v1/sessions", s.handleSessions)
+	mux.HandleFunc("/v1/sessions/", s.handleSession)
+	mux.HandleFunc("/v1/stream", s.handleStream)
+	mux.HandleFunc("/v1/codex/connect", s.handleCodexControlDisabled)
+	mux.HandleFunc("/v1/codex/status", s.handleCodexControlDisabled)
+	mux.HandleFunc("/v1/codex/thread/start", s.handleCodexControlDisabled)
+	mux.HandleFunc("/v1/codex/turn/start", s.handleCodexControlDisabled)
+	mux.HandleFunc("/v1/codex/stream", s.handleCodexControlDisabled)
+	mux.Handle("/v1/internal/hooks", http.HandlerFunc(s.handleInternalHooks))
+
+	return mux
+}
+
+func (s *Server) handleHealth(w http.ResponseWriter, _ *http.Request) {
+	writeJSON(w, http.StatusOK, map[string]any{
+		"ok":   true,
+		"time": time.Now().UTC(),
+	})
+}
+
+func (s *Server) handleStatus(w http.ResponseWriter, _ *http.Request) {
+	writeJSON(w, http.StatusOK, s.publicStatus(s.decorateSnapshot(s.store.Snapshot())))
+}
+
+func (s *Server) handleDebug(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	_, _ = w.Write([]byte(debugPageHTML))
+}
+
+func (s *Server) handleCodexDebug(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	_, _ = w.Write([]byte(codexDisabledPageHTML))
+}
+
+func (s *Server) handleNotifications(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"notifications": s.publicNotifications(s.store.Notifications()),
+	})
+}
+
+func (s *Server) handleNotificationAction(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	path := strings.TrimPrefix(r.URL.Path, "/v1/notifications/")
+	parts := strings.Split(path, "/")
+	if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
+		http.NotFound(w, r)
+		return
+	}
+
+	id := parts[0]
+	switch parts[1] {
+	case "ack":
+		notification, ok := s.store.AckNotification(id)
+		if !ok {
+			http.NotFound(w, r)
+			return
+		}
+		writeJSON(w, http.StatusOK, s.publicNotification(notification))
+	case "action":
+		var req struct {
+			Action      model.NotificationAction `json:"action"`
+			ActionToken string                   `json:"action_token"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, "invalid json body", http.StatusBadRequest)
+			return
+		}
+		if req.Action != model.NotificationActionContinue {
+			http.Error(w, "unsupported action", http.StatusBadRequest)
+			return
+		}
+		if s.control == nil {
+			http.Error(w, "continue action is not configured", http.StatusNotImplemented)
+			return
+		}
+		notification, session, ok := s.store.ContinueTarget(id, req.ActionToken)
+		if !ok {
+			http.Error(w, "notification is no longer actionable", http.StatusConflict)
+			return
+		}
+		if err := s.control.Continue(session, "继续"); err != nil {
+			http.Error(w, fmt.Sprintf("continue failed: %v", err), http.StatusBadGateway)
+			return
+		}
+		updated, ok := s.store.MarkNotificationActed(id)
+		if !ok {
+			http.Error(w, "notification disappeared after action", http.StatusConflict)
+			return
+		}
+		if s.logger != nil {
+			s.logger.Printf("continue action sent session=%s notification=%s", notification.SessionID, notification.ID)
+		}
+		writeJSON(w, http.StatusOK, s.publicNotification(updated))
+	default:
+		http.NotFound(w, r)
+	}
+}
+
+func (s *Server) handleSessions(w http.ResponseWriter, _ *http.Request) {
+	writeJSON(w, http.StatusOK, map[string]any{
+		"sessions": s.publicSessions(s.store.Sessions(), s.notificationIndex()),
+	})
+}
+
+func (s *Server) handleSession(w http.ResponseWriter, r *http.Request) {
+	path := strings.TrimPrefix(r.URL.Path, "/v1/sessions/")
+	if path == "" {
+		http.NotFound(w, r)
+		return
+	}
+
+	parts := strings.Split(path, "/")
+	switch {
+	case len(parts) == 1 && r.Method == http.MethodGet:
+		sessionID := parts[0]
+		if sessionID == "" {
+			http.NotFound(w, r)
+			return
+		}
+
+		session, ok := s.store.Session(sessionID)
+		if !ok {
+			http.NotFound(w, r)
+			return
+		}
+
+		writeJSON(w, http.StatusOK, s.publicSession(session, s.notificationIndex()[sessionID]))
+	case len(parts) == 2 && parts[1] == "continue" && r.Method == http.MethodPost:
+		s.handleSessionContinue(w, r, parts[0])
+	default:
+		http.NotFound(w, r)
+	}
+}
+
+func (s *Server) handleStream(w http.ResponseWriter, r *http.Request) {
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		http.Error(w, "streaming unsupported", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+
+	updates, cancel := s.store.Subscribe()
+	defer cancel()
+
+	ping := time.NewTicker(15 * time.Second)
+	defer ping.Stop()
+
+	for {
+		select {
+		case <-r.Context().Done():
+			return
+		case snapshot, ok := <-updates:
+			if !ok {
+				return
+			}
+			if err := writeSSE(w, "status", s.publicStatus(s.decorateSnapshot(snapshot))); err != nil {
+				return
+			}
+			flusher.Flush()
+		case <-ping.C:
+			if _, err := w.Write([]byte(": ping\n\n")); err != nil {
+				return
+			}
+			flusher.Flush()
+		}
+	}
+}
+
+func (s *Server) handleInternalHooks(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	if s.cfg.Internal.RequireLoopback && !isLoopbackRequest(r.RemoteAddr) {
+		http.Error(w, "loopback required", http.StatusForbidden)
+		return
+	}
+
+	var req model.IngestRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "invalid json body", http.StatusBadRequest)
+		return
+	}
+
+	snapshot := s.store.ApplyIngest(req)
+	if req.Payload.SessionID != "" && req.Payload.TranscriptPath != "" {
+		s.transcript.Ensure(req.Payload.SessionID, req.Payload.TranscriptPath)
+	}
+
+	writeJSON(w, http.StatusAccepted, snapshot)
+}
+
+func (s *Server) handleCodexControlDisabled(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusGone, map[string]any{
+		"ok":      false,
+		"error":   "codex app-server control endpoints are disabled in passive monitor mode",
+		"message": "use /status, /v1/status, and /v1/stream to observe the locally running codex cli session without creating threads or sending turns",
+	})
+}
+
+func (s *Server) decorateSnapshot(snapshot model.StatusSnapshot) model.StatusSnapshot {
+	if s.transcript != nil {
+		snapshot.TranscriptWatchers = s.transcript.Snapshot()
+	}
+	return snapshot
+}
+
+func (s *Server) publicStatus(snapshot model.StatusSnapshot) publicStatus {
+	notifications := s.notificationIndex()
+	activeTitle := ""
+	if snapshot.ActiveSessionID != "" {
+		if session, ok := s.store.Session(snapshot.ActiveSessionID); ok {
+			activeTitle = sessionDisplayTitle(session)
+		}
+	}
+
+	return publicStatus{
+		ServerTime:                snapshot.ServerTime,
+		OverallState:              snapshot.OverallState,
+		OverallStateDetail:        snapshot.OverallStateDetail,
+		ActiveSessionID:           snapshot.ActiveSessionID,
+		ActiveSessionDisplayTitle: activeTitle,
+		SessionsCount:             len(snapshot.Sessions),
+		Sessions:                  s.publicSessions(snapshot.Sessions, notifications),
+	}
+}
+
+func (s *Server) publicSessions(sessions []model.SessionSnapshot, notifications map[string]model.NotificationSnapshot) []publicSession {
+	items := make([]publicSession, 0, len(sessions))
+	for _, session := range sessions {
+		items = append(items, s.publicSession(session, notifications[session.SessionID]))
+	}
+	return items
+}
+
+func (s *Server) publicSession(session model.SessionSnapshot, notification model.NotificationSnapshot) publicSession {
+	item := publicSession{
+		SessionID:      session.SessionID,
+		ShortSessionID: shortSessionID(session.SessionID),
+		DisplayTitle:   sessionDisplayTitle(session),
+		State:          session.State,
+		StateDetail:    session.StateDetail,
+		UpdatedAt:      session.UpdatedAt,
+		Summary:        sessionSummary(session),
+		NeedsAttention: session.State == model.StateAttention,
+	}
+
+	if notification.ID != "" {
+		item.AttentionSummary = notification.Summary
+		item.NeedsAttention = notification.Kind == model.NotificationAttention
+		item.CanContinue = slices.Contains(notification.Actions, model.NotificationActionContinue)
+		if item.CanContinue {
+			item.ContinueAction = &publicContinueAction{
+				Method:      http.MethodPost,
+				Endpoint:    "/v1/sessions/" + session.SessionID + "/continue",
+				ActionToken: notification.ActionToken,
+				Label:       "Continue",
+			}
+		}
+	}
+
+	return item
+}
+
+func (s *Server) publicNotifications(items []model.NotificationSnapshot) []publicNotification {
+	out := make([]publicNotification, 0, len(items))
+	for _, item := range items {
+		out = append(out, s.publicNotification(item))
+	}
+	return out
+}
+
+func (s *Server) publicNotification(item model.NotificationSnapshot) publicNotification {
+	return publicNotification{
+		ID:          item.ID,
+		SessionID:   item.SessionID,
+		Kind:        item.Kind,
+		State:       item.State,
+		Title:       item.Title,
+		Summary:     item.Summary,
+		CreatedAt:   item.CreatedAt,
+		UpdatedAt:   item.UpdatedAt,
+		ActionToken: item.ActionToken,
+		Actions:     item.Actions,
+	}
+}
+
+func (s *Server) handleSessionContinue(w http.ResponseWriter, r *http.Request, sessionID string) {
+	if sessionID == "" {
+		http.NotFound(w, r)
+		return
+	}
+	if s.control == nil {
+		http.Error(w, "continue action is not configured", http.StatusNotImplemented)
+		return
+	}
+
+	var req struct {
+		ActionToken string `json:"action_token"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "invalid json body", http.StatusBadRequest)
+		return
+	}
+	req.ActionToken = strings.TrimSpace(req.ActionToken)
+	if req.ActionToken == "" {
+		http.Error(w, "missing action_token", http.StatusBadRequest)
+		return
+	}
+
+	notification, session, ok := s.continueTargetForSession(sessionID, req.ActionToken)
+	if !ok {
+		http.Error(w, "session is no longer actionable", http.StatusConflict)
+		return
+	}
+	if err := s.control.Continue(session, "继续"); err != nil {
+		http.Error(w, fmt.Sprintf("continue failed: %v", err), http.StatusBadGateway)
+		return
+	}
+	if _, ok := s.store.MarkNotificationActed(notification.ID); !ok {
+		http.Error(w, "notification disappeared after action", http.StatusConflict)
+		return
+	}
+	if s.logger != nil {
+		s.logger.Printf("continue action sent session=%s notification=%s", notification.SessionID, notification.ID)
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"ok":      true,
+		"message": "continue sent",
+		"session": s.publicSession(session, model.NotificationSnapshot{}),
+		"status":  s.publicStatus(s.decorateSnapshot(s.store.Snapshot())),
+	})
+}
+
+func (s *Server) notificationIndex() map[string]model.NotificationSnapshot {
+	items := s.store.Notifications()
+	out := make(map[string]model.NotificationSnapshot, len(items))
+	for _, item := range items {
+		out[item.SessionID] = item
+	}
+	return out
+}
+
+func (s *Server) continueTargetForSession(sessionID, token string) (model.NotificationSnapshot, model.SessionSnapshot, bool) {
+	for _, notification := range s.store.Notifications() {
+		if notification.SessionID != sessionID {
+			continue
+		}
+		if notification.ActionToken != token {
+			continue
+		}
+		return s.store.ContinueTarget(notification.ID, token)
+	}
+	return model.NotificationSnapshot{}, model.SessionSnapshot{}, false
+}
+
+func shortSessionID(value string) string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return ""
+	}
+	if len(value) <= 10 {
+		return value
+	}
+	return value[:8]
+}
+
+func sessionDisplayTitle(session model.SessionSnapshot) string {
+	if value := strings.TrimSpace(session.LastUserPromptPreview); value != "" {
+		return value
+	}
+	if value := strings.TrimSpace(session.LastAssistantMessage); value != "" {
+		return value
+	}
+	if value := strings.TrimSpace(session.LastBashCommand); value != "" {
+		return value
+	}
+	if value := strings.TrimSpace(session.CWD); value != "" {
+		base := strings.TrimSpace(filepath.Base(value))
+		if base != "" && base != "." && base != "/" {
+			return base
+		}
+		return value
+	}
+	return shortSessionID(session.SessionID)
+}
+
+func sessionSummary(session model.SessionSnapshot) string {
+	return firstNonEmpty(session.LastError, session.LastAssistantMessage, session.LastBashCommand, session.LastUserPromptPreview)
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" {
+			return value
+		}
+	}
+	return ""
+}
+
+func writeJSON(w http.ResponseWriter, status int, value any) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	_ = json.NewEncoder(w).Encode(value)
+}
+
+func writeSSE(w http.ResponseWriter, event string, value any) error {
+	data, err := json.Marshal(value)
+	if err != nil {
+		return err
+	}
+	if _, err := w.Write([]byte("event: " + event + "\n")); err != nil {
+		return err
+	}
+	if _, err := w.Write([]byte("data: " + string(data) + "\n\n")); err != nil {
+		return err
+	}
+	return nil
+}
+
+func isLoopbackRequest(remoteAddr string) bool {
+	host, _, err := net.SplitHostPort(remoteAddr)
+	if err != nil {
+		host = remoteAddr
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
+}
+
+var debugPageHTML = `<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>codex-buddy status</title>
+  <style>
+    body { font-family: ui-sans-serif, system-ui, sans-serif; margin: 24px; background: #0b1020; color: #edf2f7; }
+    .wrap { max-width: 760px; margin: 0 auto; }
+    .card { background: #11182d; border: 1px solid #22304f; border-radius: 14px; padding: 16px; }
+    h1, h2 { margin-top: 0; }
+    .status { display: inline-block; padding: 6px 12px; border-radius: 999px; background: #1e293b; border: 1px solid #334155; text-transform: lowercase; }
+    .status-offline { background: #111827; border-color: #374151; }
+    .status-idle { background: #0f172a; border-color: #334155; }
+    .status-running { background: #172554; border-color: #2563eb; }
+    .status-attention { background: #3f2b02; border-color: #f59e0b; }
+    .status-error { background: #3b0a0a; border-color: #ef4444; }
+    .muted { color: #94a3b8; font-size: 12px; }
+    .summary { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+    .sessions { display: grid; gap: 10px; margin-top: 16px; }
+    .session { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; background: #0a1124; border: 1px solid #22304f; border-radius: 10px; padding: 12px; }
+    .session-main { min-width: 0; }
+    .session-name { font-weight: 600; word-break: break-word; }
+    .session-meta { margin-top: 4px; }
+    .session-summary { margin-top: 8px; color: #dbe6ff; word-break: break-word; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="card" style="margin-top:16px;">
+      <h1>codex-buddy Status</h1>
+      <p class="muted">Shows aggregate state, session summaries, attention details, and continue capability for browser, uConsole, and mobile clients.</p>
+      <div class="summary">
+        <div>
+          <div class="muted">aggregate status</div>
+          <div style="margin-top:8px;"><span class="status status-offline" id="overall">offline</span></div>
+        </div>
+        <div style="text-align:right;">
+          <div class="muted">active session</div>
+          <div id="activeSession">-</div>
+          <div class="muted" id="serverTime" style="margin-top:8px;">server_time: -</div>
+        </div>
+      </div>
+      <h2 style="margin-top:20px;">Sessions</h2>
+      <div class="sessions" id="sessions"></div>
+    </div>
+  </div>
+  <script>
+    let source;
+    const states = ['offline', 'idle', 'running', 'attention', 'error'];
+    function escapeHTML(value) {
+      return String(value || '')
+        .replaceAll('&', '&amp;')
+        .replaceAll('<', '&lt;')
+        .replaceAll('>', '&gt;')
+        .replaceAll('"', '&quot;')
+        .replaceAll("'", '&#39;');
+    }
+    function normalizeState(value) {
+      const state = String(value || '').toLowerCase();
+      if (state === 'running_bash') return 'running';
+      return states.includes(state) ? state : 'offline';
+    }
+    function renderStateChip(el, state) {
+      const normalized = normalizeState(state);
+      el.className = 'status status-' + normalized;
+      el.textContent = normalized;
+    }
+    async function loadOnce() {
+      const resp = await fetch('/v1/status');
+      if (!resp.ok) throw new Error('status request failed: ' + resp.status);
+      return resp.json();
+    }
+    function render(snapshot) {
+      renderStateChip(document.getElementById('overall'), snapshot.overall_state);
+      document.getElementById('serverTime').textContent = 'server_time: ' + (snapshot.server_time || '-');
+      document.getElementById('activeSession').textContent = snapshot.active_session_display_title || snapshot.active_session_id || '-';
+      const sessions = document.getElementById('sessions');
+      sessions.innerHTML = '';
+      if (!Array.isArray(snapshot.sessions) || snapshot.sessions.length === 0) {
+        sessions.innerHTML = '<div class="session"><div class="session-main"><div class="session-name muted">No active sessions</div></div><span class="status status-offline">offline</span></div>';
+        return;
+      }
+      snapshot.sessions.forEach((session) => {
+        const title = session.display_title || session.short_session_id || session.session_id || 'unknown';
+        const detail = session.attention_summary || session.summary || '';
+        const meta = [];
+        if (session.short_session_id) meta.push(session.short_session_id);
+        if (session.updated_at) meta.push(session.updated_at);
+        if (session.can_continue) meta.push('continue available');
+        const el = document.createElement('div');
+        el.className = 'session';
+        el.innerHTML = [
+          '<div class="session-main">',
+          '  <div class="session-name">' + escapeHTML(title) + '</div>',
+          '  <div class="muted session-meta">' + escapeHTML(meta.join(' · ')) + '</div>',
+          detail ? ('  <div class="session-summary">' + escapeHTML(detail) + '</div>') : '',
+          '</div>',
+          '<span class="status status-' + normalizeState(session.state) + '">' + normalizeState(session.state) + '</span>'
+        ].join('');
+        sessions.appendChild(el);
+      });
+    }
+    async function connect() {
+      if (source) source.close();
+      render(await loadOnce());
+      source = new EventSource('/v1/stream');
+      source.addEventListener('status', (event) => render(JSON.parse(event.data)));
+      source.onerror = () => {
+        renderStateChip(document.getElementById('overall'), 'error');
+        document.getElementById('serverTime').textContent = 'stream_error';
+      };
+    }
+    connect().catch((err) => {
+      renderStateChip(document.getElementById('overall'), 'error');
+      document.getElementById('serverTime').textContent = String(err);
+    });
+  </script>
+</body>
+</html>`
+
+var codexDisabledPageHTML = `<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>codex-buddy passive mode</title>
+  <style>
+    body { font-family: ui-sans-serif, system-ui, sans-serif; margin: 24px; background: #0b1020; color: #edf2f7; }
+    .wrap { max-width: 720px; margin: 0 auto; }
+    .card { background: #11182d; border: 1px solid #22304f; border-radius: 14px; padding: 16px; }
+    .muted { color: #94a3b8; font-size: 12px; }
+    a { color: #8fb4ff; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="card">
+      <h1>Passive Monitor Only</h1>
+      <p>To avoid interfering with your normal <code>codex cli</code> workflow, ` + "`/debug/codex`" + ` and ` + "`/v1/codex/*`" + ` are disabled.</p>
+      <p>The current build keeps passive monitoring only: it observes real local sessions through hooks and transcript watching, without creating threads or sending turns.</p>
+      <p><a href="/status">Open the passive status page</a></p>
+      <p class="muted">If approval or rejection flows are needed later, evaluate them separately with an app-server based design.</p>
+    </div>
+  </div>
+</body>
+</html>`

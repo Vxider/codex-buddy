@@ -1,0 +1,60 @@
+{
+  "listen": {
+    "host": "127.0.0.1",
+    "port": 8787
+  },
+  "internal": {
+    "require_loopback": true
+  },
+  "state": {
+    "attention_hold_ms": 15000,
+    "idle_fallback_ms": 10000
+  },
+  "transcript": {
+    "enabled": true,
+    "tail_from_end": true,
+    "poll_interval_ms": 1000
+  },
+  "hook_client": {
+    "request_timeout_ms": 1500,
+    "autostart_enabled": true,
+    "autostart_command": [
+      "systemctl",
+      "--user",
+      "start",
+      "codex-buddy.service"
+    ]
+  },
+  "app_server": {
+    "command": [
+      "codex",
+      "app-server"
+    ],
+    "request_timeout_ms": 30000,
+    "client_info": {
+      "name": "codex_buddy_debug",
+      "title": "codex-buddy Debug Client",
+      "version": "0.1.0"
+    }
+  },
+  "uconsole": {
+    "server_url": "http://127.0.0.1:8787",
+    "http_timeout_ms": 3000,
+    "reconnect_delay_ms": 3000,
+    "poll_fallback_ms": 10000,
+    "continue_hold_ms": 800,
+    "window": {
+      "width": 920,
+      "height": 600,
+      "fullscreen": false
+    },
+    "led": {
+      "enabled": true,
+      "pixels": 8,
+      "brightness": 40,
+      "gpio_pin": 18,
+      "dma_num": 10,
+      "frequency": 800000
+    }
+  }
+}

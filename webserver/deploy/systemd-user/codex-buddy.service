@@ -1,0 +1,11 @@
+[Unit]
+Description=codex-buddy daemon
+After=default.target
+
+[Service]
+ExecStart=%h/.local/bin/codex-buddy serve --config %h/.config/codex-buddy/config.json
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=default.target

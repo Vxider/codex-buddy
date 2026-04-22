@@ -1,0 +1,67 @@
+# OS / filesystem
+.DS_Store
+Thumbs.db
+.AppleDouble
+.LSOverride
+Icon?
+ehthumbs.db
+Desktop.ini
+
+# Editors
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.history/
+.fleet/
+
+# Go build outputs
+bin/
+dist/
+coverage.out
+*.test
+*.out
+*.prof
+*.coverprofile
+cover.out
+
+# Local runtime / temp files
+.env
+.env.*
+.envrc
+.direnv/
+tmp/
+.tmp/
+tmp-*/
+*.log
+*.pid
+
+# Xcode / Swift
+DerivedData/
+build/
+.build/
+*.xcworkspace/
+*.xcodeproj/
+xcuserdata/
+*.xcuserstate
+*.xcscmblueprint
+*.moved-aside
+*.ipa
+*.dSYM
+*.dSYM.zip
+*.playground/
+.swiftpm/
+Packages/
+Package.resolved
+
+# XcodeGen generated project
+ios/CodexBuddy.xcodeproj/
+
+# Local Codex / helper state
+.codex
+
+# Test / browser tooling
+.pytest_cache/
+.cache/
+playwright-report/

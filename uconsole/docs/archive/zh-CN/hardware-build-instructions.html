@@ -1,0 +1,635 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>uConsole RGB 灯柱硬件构建说明</title>
+  <style>
+    :root {
+      --ink: #1d1f24;
+      --muted: #5a6272;
+      --line: #d9deea;
+      --paper: #ffffff;
+      --accent: #1f5eff;
+      --accent-soft: #eef4ff;
+      --ok: #138a4b;
+      --warn: #9a6a00;
+      --danger: #b42318;
+      --mono: "JetBrains Mono", "SFMono-Regular", Consolas, monospace;
+      --sans: "Noto Sans CJK SC", "Noto Sans SC", "PingFang SC", "Microsoft YaHei", sans-serif;
+    }
+
+    @page {
+      size: A4;
+      margin: 16mm 14mm 18mm 14mm;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      color: var(--ink);
+      background: var(--paper);
+      font: 14px/1.6 var(--sans);
+    }
+
+    .page {
+      width: 100%;
+      max-width: 960px;
+      margin: 0 auto;
+      padding: 20px 0 40px;
+    }
+
+    .hero {
+      padding: 22px 24px 18px;
+      border: 1px solid var(--line);
+      border-radius: 18px;
+      background:
+        radial-gradient(circle at top right, rgba(31, 94, 255, 0.12), transparent 30%),
+        linear-gradient(180deg, #fbfcff 0%, #f5f8ff 100%);
+    }
+
+    h1 {
+      margin: 0 0 8px;
+      font-size: 28px;
+      line-height: 1.2;
+    }
+
+    .subtitle {
+      color: var(--muted);
+      margin: 0;
+      font-size: 14px;
+    }
+
+    .meta {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+      margin-top: 14px;
+    }
+
+    .chip {
+      display: inline-block;
+      padding: 4px 10px;
+      border-radius: 999px;
+      border: 1px solid #cdd9ff;
+      background: rgba(255,255,255,0.8);
+      color: #274690;
+      font-size: 12px;
+    }
+
+    h2 {
+      margin: 24px 0 10px;
+      padding-bottom: 6px;
+      border-bottom: 2px solid var(--line);
+      font-size: 20px;
+    }
+
+    h3 {
+      margin: 18px 0 8px;
+      font-size: 16px;
+    }
+
+    p { margin: 8px 0; }
+    ul, ol { margin: 8px 0 8px 20px; }
+    li { margin: 4px 0; }
+
+    .grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 14px;
+      margin-top: 14px;
+    }
+
+    .card {
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      padding: 14px 16px;
+      background: #fff;
+      break-inside: avoid;
+    }
+
+    .callout {
+      margin: 12px 0;
+      padding: 12px 14px;
+      border-left: 4px solid var(--accent);
+      background: var(--accent-soft);
+      border-radius: 10px;
+    }
+
+    .warn {
+      border-left-color: #e29b00;
+      background: #fff8e8;
+    }
+
+    .danger {
+      border-left-color: #d92d20;
+      background: #fff1f0;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin: 10px 0 14px;
+      font-size: 13px;
+    }
+
+    th, td {
+      border: 1px solid var(--line);
+      padding: 8px 10px;
+      text-align: left;
+      vertical-align: top;
+    }
+
+    th {
+      background: #f6f8fc;
+      font-weight: 700;
+    }
+
+    code, pre {
+      font-family: var(--mono);
+      font-size: 12px;
+    }
+
+    pre {
+      margin: 10px 0 14px;
+      padding: 12px 14px;
+      overflow: auto;
+      border-radius: 12px;
+      border: 1px solid var(--line);
+      background: #f8fafc;
+      white-space: pre-wrap;
+    }
+
+    .steps li {
+      margin: 8px 0;
+    }
+
+    .small {
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    .footer {
+      margin-top: 24px;
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    .diagram {
+      margin: 12px 0 16px;
+      padding: 12px;
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      background: #fcfdff;
+      break-inside: avoid;
+    }
+
+    .diagram svg {
+      width: 100%;
+      height: auto;
+      display: block;
+    }
+
+    .status-legend {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 10px;
+      margin-top: 10px;
+    }
+
+    .legend-item {
+      padding: 10px 12px;
+      border-radius: 12px;
+      border: 1px solid var(--line);
+      background: #fff;
+    }
+
+    .dot {
+      display: inline-block;
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      margin-right: 8px;
+      vertical-align: middle;
+    }
+
+    .red { background: #d92d20; }
+    .green { background: #16a34a; }
+    .blue { background: #2563eb; }
+    .yellow { background: #eab308; }
+
+    @media print {
+      .page { max-width: none; padding: 0; }
+      a { color: inherit; text-decoration: none; }
+      .hero, .card, .legend-item, pre, table { break-inside: avoid; }
+    }
+  </style>
+</head>
+<body>
+  <main class="page">
+    <section class="hero">
+      <h1>uConsole RGB 灯柱硬件构建说明</h1>
+      <p class="subtitle">
+        用于 <strong>codex-buddy</strong> 的侧板单灯 RGB 状态指示器方案。目标是以最小改动在 uConsole 上实现稳定、可返修、可扩展的状态灯硬件。
+      </p>
+      <div class="meta">
+        <span class="chip">设备：uConsole</span>
+        <span class="chip">Core：CM5</span>
+        <span class="chip">方案：单颗 RGB LED + 灯柱</span>
+        <span class="chip">版本：V1 构建说明</span>
+      </div>
+    </section>
+
+    <section>
+      <h2>1. 方案概览</h2>
+      <div class="callout">
+        推荐结构：<strong>1 x 3mm 共阴极雾面 RGB LED + 1 x 短灯柱 / 导光件 + 1 x 改造侧板 + 1 x 背部灯座</strong>。
+      </div>
+      <div class="grid">
+        <div class="card">
+          <h3>这版做什么</h3>
+          <ul>
+            <li>在 uConsole 扩展舱侧板上做一个单孔 RGB 灯柱状态灯。</li>
+            <li>从主板 J3 GPIO 扩展口取 3 路 GPIO 和 1 路 GND。</li>
+            <li>通过软件映射显示 online、running、attention、error 等状态。</li>
+          </ul>
+        </div>
+        <div class="card">
+          <h3>为什么不做三颗分立 LED</h3>
+          <ul>
+            <li>正面更整洁，只需一个出光窗口。</li>
+            <li>背部结构更紧凑，更适合侧板净空。</li>
+            <li>RGB 更容易实现闪烁、呼吸和状态过渡。</li>
+          </ul>
+        </div>
+      </div>
+    </section>
+
+    <section>
+      <h2>2. 物料清单</h2>
+      <table>
+        <thead>
+          <tr>
+            <th>类别</th>
+            <th>推荐规格</th>
+            <th>数量</th>
+            <th>备注</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>RGB LED</td>
+            <td>3mm 雾面直插，共阴极</td>
+            <td>1</td>
+            <td>首版优先，接线直观、易返修</td>
+          </tr>
+          <tr>
+            <td>电阻</td>
+            <td>470R，1/8W 或 1/4W</td>
+            <td>3</td>
+            <td>R/G/B 每路各一颗</td>
+          </tr>
+          <tr>
+            <td>排线</td>
+            <td>4 芯 28AWG 软排线</td>
+            <td>1</td>
+            <td>线序建议：R / G / B / GND</td>
+          </tr>
+          <tr>
+            <td>灯柱</td>
+            <td>2mm - 3mm 亚克力圆棒或透明打印件</td>
+            <td>1</td>
+            <td>首版优先用亚克力圆棒</td>
+          </tr>
+          <tr>
+            <td>侧板</td>
+            <td>uConsole 侧板替换件改模</td>
+            <td>1</td>
+            <td>基于 Printables 模型二次修改</td>
+          </tr>
+          <tr>
+            <td>灯座</td>
+            <td>3D 打印件</td>
+            <td>1</td>
+            <td>固定 RGB LED、灯柱、混光腔</td>
+          </tr>
+          <tr>
+            <td>辅料</td>
+            <td>热缩管、Kapton 胶带、3M 薄双面胶</td>
+            <td>若干</td>
+            <td>用于绝缘、固定和走线</td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section>
+      <h2>3. GPIO 连接方案</h2>
+      <div class="grid">
+        <div class="card">
+          <h3>推荐焊接点</h3>
+          <p>优先使用 <strong>uConsole 主板 J3 40-pin GPIO 扩展口</strong>，不要直接焊 CM5 模组本体。</p>
+          <ul>
+            <li><strong>Pin 11</strong> → <code>GPIO17</code> → Red</li>
+            <li><strong>Pin 13</strong> → <code>GPIO27</code> → Green</li>
+            <li><strong>Pin 15</strong> → <code>GPIO22</code> → Blue</li>
+            <li><strong>Pin 39</strong> → <code>GND</code></li>
+          </ul>
+        </div>
+        <div class="card">
+          <h3>为什么选这三个 GPIO</h3>
+          <ul>
+            <li>都是稳定的通用输出脚。</li>
+            <li>不占用 <code>GPIO0/1</code> 和默认 <code>I2C</code> 主线。</li>
+            <li>不依赖硬件 PWM，软件控制就够用。</li>
+            <li>后续维护时容易记忆和复用。</li>
+          </ul>
+        </div>
+      </div>
+      <pre>GPIO17 ---- 470R ---- R 引脚
+GPIO27 ---- 470R ---- G 引脚
+GPIO22 ---- 470R ---- B 引脚
+
+RGB LED 公共阴极 ---- GND</pre>
+      <p class="small">第一版建议统一使用 470R。等结构跑通后，再按亮度和平衡微调阻值。</p>
+    </section>
+
+    <section>
+      <h2>4. 机械结构建议</h2>
+      <div class="callout warn">
+        第一版优先做 <strong>圆孔 + 短灯柱</strong>，不要一上来做长条导光件。这样最容易成功，也最容易返工。
+      </div>
+      <table>
+        <thead>
+          <tr>
+            <th>项目</th>
+            <th>推荐值</th>
+            <th>说明</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>侧板开孔</td>
+            <td>3.2mm - 3.5mm 圆孔</td>
+            <td>适配 3mm 灯柱或 LED 前端空间</td>
+          </tr>
+          <tr>
+            <td>灯柱材料</td>
+            <td>2mm - 3mm 亚克力圆棒</td>
+            <td>透明度和加工性最好</td>
+          </tr>
+          <tr>
+            <td>灯柱外露高度</td>
+            <td>0.3mm - 1.0mm</td>
+            <td>可齐平，也可略微内凹以提升耐用性</td>
+          </tr>
+          <tr>
+            <td>混光腔</td>
+            <td>1mm - 3mm</td>
+            <td>RGB LED 与灯柱之间预留距离，用于混光</td>
+          </tr>
+          <tr>
+            <td>安装位置</td>
+            <td>侧板上半段</td>
+            <td>避开底部固定螺丝区域</td>
+          </tr>
+        </tbody>
+      </table>
+      <pre>侧板外表面
+  -> 灯柱出光端
+  -> 侧板窗口
+  -> 灯柱 / 导光件
+  -> 混光腔（1 - 3mm）
+  -> RGB LED
+  -> 焊点 + 热缩管
+  -> 4 芯软排线</pre>
+    </section>
+
+    <section>
+      <h2>5. 接线示意图</h2>
+      <p>下面这张图用于明确 <strong>J3 GPIO</strong>、<strong>三颗串联电阻</strong> 和 <strong>共阴极 RGB LED</strong> 的关系。第一版不追求复杂控制，先保证三路颜色可单独点亮。</p>
+      <div class="diagram">
+        <svg viewBox="0 0 980 420" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="uConsole RGB LED wiring diagram">
+          <defs>
+            <style>
+              .box{fill:#fff;stroke:#cfd7e6;stroke-width:2}
+              .label{font:16px sans-serif;fill:#1d1f24}
+              .smalltxt{font:13px sans-serif;fill:#5a6272}
+              .wire{fill:none;stroke-width:4;stroke-linecap:round;stroke-linejoin:round}
+              .redw{stroke:#d92d20}
+              .greenw{stroke:#16a34a}
+              .bluew{stroke:#2563eb}
+              .gndw{stroke:#475467}
+              .res{fill:#fff7ed;stroke:#f59e0b;stroke-width:2}
+            </style>
+          </defs>
+
+          <rect x="28" y="60" width="230" height="260" rx="18" class="box"/>
+          <text x="52" y="95" class="label">uConsole 主板 J3</text>
+          <text x="52" y="120" class="smalltxt">推荐焊接点：从 J3 取 3 路 GPIO + 1 路 GND</text>
+
+          <circle cx="80" cy="165" r="6" fill="#d92d20"/>
+          <text x="98" y="171" class="label">Pin 11 / GPIO17</text>
+
+          <circle cx="80" cy="210" r="6" fill="#16a34a"/>
+          <text x="98" y="216" class="label">Pin 13 / GPIO27</text>
+
+          <circle cx="80" cy="255" r="6" fill="#2563eb"/>
+          <text x="98" y="261" class="label">Pin 15 / GPIO22</text>
+
+          <circle cx="80" cy="300" r="6" fill="#475467"/>
+          <text x="98" y="306" class="label">Pin 39 / GND</text>
+
+          <rect x="372" y="142" width="96" height="30" rx="8" class="res"/>
+          <text x="402" y="162" class="label" style="font-size:14px">470R</text>
+          <rect x="372" y="187" width="96" height="30" rx="8" class="res"/>
+          <text x="402" y="207" class="label" style="font-size:14px">470R</text>
+          <rect x="372" y="232" width="96" height="30" rx="8" class="res"/>
+          <text x="402" y="252" class="label" style="font-size:14px">470R</text>
+
+          <path d="M 258 165 L 372 165" class="wire redw"/>
+          <path d="M 258 210 L 372 202" class="wire greenw"/>
+          <path d="M 258 255 L 372 247" class="wire bluew"/>
+
+          <rect x="640" y="92" width="250" height="240" rx="18" class="box"/>
+          <text x="664" y="125" class="label">3mm 共阴极雾面 RGB LED</text>
+          <text x="664" y="150" class="smalltxt">正向接三路电阻，公共阴极直接接地</text>
+
+          <circle cx="738" cy="196" r="20" fill="#fff" stroke="#cfd7e6" stroke-width="2"/>
+          <circle cx="720" cy="196" r="6" fill="#d92d20"/>
+          <circle cx="738" cy="180" r="6" fill="#16a34a"/>
+          <circle cx="756" cy="196" r="6" fill="#2563eb"/>
+          <text x="688" y="240" class="smalltxt">R / G / B 发光芯片</text>
+
+          <line x1="704" y1="264" x2="704" y2="314" class="wire redw"/>
+          <line x1="732" y1="264" x2="732" y2="314" class="wire greenw"/>
+          <line x1="760" y1="264" x2="760" y2="314" class="wire bluew"/>
+          <line x1="788" y1="264" x2="788" y2="314" class="wire gndw"/>
+
+          <text x="690" y="334" class="smalltxt">R</text>
+          <text x="718" y="334" class="smalltxt">G</text>
+          <text x="746" y="334" class="smalltxt">B</text>
+          <text x="775" y="334" class="smalltxt">COM-</text>
+
+          <path d="M 468 165 L 640 165 L 640 314 L 704 314" class="wire redw"/>
+          <path d="M 468 202 L 610 202 L 610 314 L 732 314" class="wire greenw"/>
+          <path d="M 468 247 L 580 247 L 580 314 L 760 314" class="wire bluew"/>
+          <path d="M 258 300 L 560 300 L 560 360 L 788 360 L 788 314" class="wire gndw"/>
+
+          <text x="36" y="382" class="smalltxt">说明：首版建议统一 470R；如红色偏亮，可将红色通道升到 680R。</text>
+        </svg>
+      </div>
+    </section>
+
+    <section>
+      <h2>6. 爆炸装配关系图</h2>
+      <p>这张图不是精确 CAD，而是给打印、装配和走线时使用的层级关系说明。V1 的目标是先把结构和出光做稳定，再考虑长条灯柱等更复杂的外观。</p>
+      <div class="diagram">
+        <svg viewBox="0 0 980 500" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="uConsole RGB LED exploded assembly diagram">
+          <defs>
+            <style>
+              .plate{fill:#f7f8fb;stroke:#cfd7e6;stroke-width:2}
+              .part{stroke:#cfd7e6;stroke-width:2}
+              .txt{font:16px sans-serif;fill:#1d1f24}
+              .stxt{font:13px sans-serif;fill:#5a6272}
+              .guide{stroke:#98a2b3;stroke-width:2;stroke-dasharray:8 8}
+            </style>
+          </defs>
+
+          <rect x="84" y="130" width="150" height="240" rx="18" class="plate"/>
+          <circle cx="190" cy="210" r="12" fill="#fff" stroke="#98a2b3" stroke-width="2"/>
+          <text x="106" y="390" class="txt">A. 改造侧板</text>
+          <text x="106" y="414" class="stxt">外部只露出一个灯柱窗口</text>
+
+          <rect x="310" y="165" width="70" height="90" rx="18" fill="#eef4ff" class="part"/>
+          <rect x="330" y="120" width="30" height="70" rx="12" fill="#dbeafe" class="part"/>
+          <text x="286" y="390" class="txt">B. 灯柱 / 导光件</text>
+          <text x="286" y="414" class="stxt">建议 2mm - 3mm 亚克力圆棒</text>
+
+          <rect x="450" y="150" width="160" height="130" rx="18" fill="#fff" class="part"/>
+          <rect x="474" y="175" width="112" height="80" rx="12" fill="#f8fafc" stroke="#98a2b3" stroke-width="2"/>
+          <circle cx="530" cy="215" r="22" fill="#fff" stroke="#98a2b3" stroke-width="2"/>
+          <text x="430" y="390" class="txt">C. 3D 打印灯座</text>
+          <text x="430" y="414" class="stxt">包含 LED 定位、灯柱定位和遮光壁</text>
+          <text x="430" y="436" class="stxt">中间预留 1 - 3mm 混光腔</text>
+
+          <rect x="700" y="172" width="70" height="60" rx="12" fill="#fff7ed" class="part"/>
+          <circle cx="724" cy="202" r="6" fill="#d92d20"/>
+          <circle cx="736" cy="192" r="6" fill="#16a34a"/>
+          <circle cx="748" cy="202" r="6" fill="#2563eb"/>
+          <text x="668" y="390" class="txt">D. RGB LED</text>
+          <text x="668" y="414" class="stxt">3mm 共阴极雾面直插</text>
+
+          <rect x="840" y="145" width="52" height="145" rx="16" fill="#f8fafc" class="part"/>
+          <line x1="860" y1="290" x2="860" y2="360" stroke="#d92d20" stroke-width="4"/>
+          <line x1="872" y1="290" x2="872" y2="360" stroke="#16a34a" stroke-width="4"/>
+          <line x1="884" y1="290" x2="884" y2="360" stroke="#2563eb" stroke-width="4"/>
+          <line x1="896" y1="290" x2="896" y2="360" stroke="#475467" stroke-width="4"/>
+          <text x="798" y="390" class="txt">E. 焊点 + 排线</text>
+          <text x="798" y="414" class="stxt">热缩管绝缘后沿壳体边缘走线</text>
+
+          <line x1="234" y1="210" x2="310" y2="210" class="guide"/>
+          <line x1="380" y1="210" x2="450" y2="210" class="guide"/>
+          <line x1="610" y1="210" x2="700" y2="210" class="guide"/>
+          <line x1="770" y1="210" x2="840" y2="210" class="guide"/>
+
+          <text x="84" y="56" class="txt">装配顺序建议</text>
+          <text x="84" y="84" class="stxt">1. 先验证侧板孔位  2. 固定灯柱  3. 安装灯座  4. 焊接 RGB LED 和排线  5. 开壳通电测试  6. 回装整机</text>
+        </svg>
+      </div>
+    </section>
+
+    <section>
+      <h2>7. 3D 打印灯座要求</h2>
+      <div class="grid">
+        <div class="card">
+          <h3>灯座必须完成的功能</h3>
+          <ul>
+            <li>固定 1 颗 RGB LED。</li>
+            <li>固定 1 根灯柱或导光件。</li>
+            <li>提供遮光腔，减少串色和漏光。</li>
+            <li>留出焊脚、热缩管和排线转向空间。</li>
+          </ul>
+        </div>
+        <div class="card">
+          <h3>建议结构</h3>
+          <ul>
+            <li>LED 定位孔一侧，灯柱定位孔一侧。</li>
+            <li>中间保留 1 - 3mm 混光腔。</li>
+            <li>外围加遮光壁。</li>
+            <li>第一版用 3M 薄双面胶固定到侧板背面即可。</li>
+          </ul>
+        </div>
+      </div>
+    </section>
+
+    <section>
+      <h2>8. 构建步骤</h2>
+      <ol class="steps">
+        <li>基于 uConsole 侧板模型建立二次修改文件，先只做单个圆孔版本。</li>
+        <li>打印一版侧板验证件，确认孔位、螺丝位和壳体净空。</li>
+        <li>制作灯座，确认 RGB LED、灯柱和混光腔尺寸匹配。</li>
+        <li>将 3 颗 470R 电阻分别串联到 R/G/B 三路线上，套热缩管绝缘。</li>
+        <li>将 4 芯排线焊到 RGB LED：R、G、B 以及公共阴极 GND。</li>
+        <li>将排线另一端焊到 uConsole 主板 J3：Pin 11 / 13 / 15 / 39。</li>
+        <li>用 Kapton 胶带沿壳体边缘整理排线，避免与装配件和转轴干涉。</li>
+        <li>固定灯座和灯柱，先在开壳状态下做通电测试，再完成整机回装。</li>
+      </ol>
+    </section>
+
+    <section>
+      <h2>9. 上电测试</h2>
+      <div class="status-legend">
+        <div class="legend-item"><span class="dot green"></span>在线 / Idle：绿色常亮</div>
+        <div class="legend-item"><span class="dot blue"></span>Running：蓝色常亮</div>
+        <div class="legend-item"><span class="dot blue"></span>Running Bash：蓝色慢闪</div>
+        <div class="legend-item"><span class="dot yellow"></span>Attention：黄色慢闪</div>
+        <div class="legend-item"><span class="dot red"></span>Error：红色常亮</div>
+        <div class="legend-item">Offline：熄灭</div>
+      </div>
+      <div class="callout">
+        如果首版只想验证硬件，不必一开始就做呼吸灯。先验证 3 路 GPIO 分别能稳定点亮 R/G/B 三个颜色即可。
+      </div>
+    </section>
+
+    <section>
+      <h2>10. 风险与规避</h2>
+      <div class="grid">
+        <div class="card">
+          <h3>颜色不均匀</h3>
+          <p>不要让 RGB LED 紧贴出光面，保留混光腔；优先选择雾面 RGB LED。</p>
+        </div>
+        <div class="card">
+          <h3>灯太亮</h3>
+          <p>从 470R 起步。如果仍过亮，优先将红色升到 680R，再调其他颜色。</p>
+        </div>
+        <div class="card">
+          <h3>透明导光件漏光</h3>
+          <p>灯座外围要做遮光壁，导光件和灯座间不要留过大缝隙。</p>
+        </div>
+        <div class="card">
+          <h3>首版结构过于复杂</h3>
+          <p>第一版只做圆孔 + 短灯柱，不要直接上长条灯柱窗口。</p>
+        </div>
+      </div>
+      <div class="callout danger">
+        不建议把线直接焊到 CM5 模组本体，也不建议从高密度显示或摄像头连接器偷线。这两种方式的返修成本都偏高。
+      </div>
+    </section>
+
+    <section>
+      <h2>11. 外部参考</h2>
+      <ul>
+        <li>uConsole 官方硬件仓库：<a href="https://github.com/clockworkpi/uConsole">https://github.com/clockworkpi/uConsole</a></li>
+        <li>uConsole 组装指南：<a href="https://github.com/clockworkpi/uConsole/blob/master/Clockwork_uConsole_Assembly_Guidelines.pdf">Assembly Guidelines</a></li>
+        <li>侧板参考模型：<a href="https://www.printables.com/model/646000-clockwork-pi-uconsole-lteno-lte-side-plate">Printables 侧板模型</a></li>
+      </ul>
+    </section>
+
+    <p class="footer">
+      文件用途：`codex-buddy` 项目硬件构建说明。该版本面向 uConsole + CM5 + 单颗 RGB 灯柱 V1 结构验证。
+    </p>
+  </main>
+</body>
+</html>
