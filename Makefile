@@ -4,6 +4,10 @@ APP_DIR := $(CURDIR)
 build:
 	go build -o bin/codex-buddy ./cmd/codex-buddy
 
+.PHONY: test
+test:
+	go test ./...
+
 .PHONY: install
 install:
 	./webserver/scripts/build-install.sh
@@ -22,4 +26,4 @@ run:
 
 .PHONY: fmt
 fmt:
-	gofmt -w ./cmd ./internal
+	gofmt -w $$(find cmd internal webserver uconsole -name '*.go' | sort)
