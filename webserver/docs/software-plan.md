@@ -104,8 +104,8 @@ Recommended state transitions:
 - Bash tool finished -> `running`
 - successful stop -> `attention`
 - failed stop -> `error`
-- stale `running` or `running_bash` -> `idle` after fallback timeout
-- `attention` -> `idle` after the attention hold timeout
+- stale `running` or `running_bash` -> `idle` only when an operator explicitly enables a fallback timeout
+- `attention` -> `idle` only when an operator explicitly enables an attention hold timeout
 
 ## Snapshot contract
 
@@ -166,6 +166,7 @@ Recommended defaults for the passive setup:
 - no token auth on local-network status endpoints
 - Tailscale or another trusted internal network for remote access
 - no public internet exposure by default
+- no automatic state decay for `running` or `attention`
 
 ## Client expectations
 

@@ -77,7 +77,7 @@ func (s *Store) ApplyIngest(req model.IngestRequest) model.StatusSnapshot {
 		session.LastUserPromptPreview = preview(req.Payload.Prompt)
 	}
 	if req.Payload.LastAssistantMessage != "" {
-		session.LastAssistantMessage = preview(req.Payload.LastAssistantMessage)
+		session.LastAssistantMessage = previewAssistant(req.Payload.LastAssistantMessage)
 	}
 	if req.Payload.Error != "" {
 		session.LastError = preview(req.Payload.Error)
@@ -109,7 +109,7 @@ func (s *Store) ApplyIngest(req model.IngestRequest) model.StatusSnapshot {
 			session.StateDetail = string(model.StateRunning)
 		}
 	case "stop":
-		session.CurrentAttentionDeadline = time.Now().Add(s.attentionHold)
+		session.CurrentAttentionDeadline = s.attentionDeadline()
 		if req.Payload.Error != "" {
 			session.State = model.StateError
 			session.StateDetail = string(model.StateError)
@@ -168,7 +168,7 @@ func (s *Store) ApplyTranscriptUpdate(update model.TranscriptUpdate) model.Statu
 		session.LastUserPromptPreview = preview(update.LastUserPromptPreview)
 	}
 	if update.LastAssistantMessage != "" {
-		session.LastAssistantMessage = preview(update.LastAssistantMessage)
+		session.LastAssistantMessage = previewAssistant(update.LastAssistantMessage)
 	}
 	if update.LastBashCommand != "" {
 		session.LastBashCommand = preview(update.LastBashCommand)
@@ -177,7 +177,7 @@ func (s *Store) ApplyTranscriptUpdate(update model.TranscriptUpdate) model.Statu
 		session.State = model.StateError
 		session.StateDetail = string(model.StateError)
 		session.LastError = preview(update.Error)
-		session.CurrentAttentionDeadline = time.Now().Add(s.attentionHold)
+		session.CurrentAttentionDeadline = s.attentionDeadline()
 	}
 
 	s.appendRecentEventLocked(model.RecentEvent{
@@ -422,6 +422,13 @@ func (s *Store) deriveSession(session model.SessionSnapshot) model.SessionSnapsh
 	return session
 }
 
+func (s *Store) attentionDeadline() time.Time {
+	if s.attentionHold <= 0 {
+		return time.Time{}
+	}
+	return time.Now().Add(s.attentionHold)
+}
+
 func (s *Store) reconcileNotificationLocked(session *sessionState, previous, current model.SessionSnapshot, now time.Time) {
 	prevKind, _ := notificationKindForState(previous.State)
 	currentKind, currentEligible := notificationKindForState(current.State)
@@ -640,6 +647,41 @@ func preview(value string) string {
 	return string(runes[:limit]) + "..."
 }
 
+func previewTail(value string) string {
+	value = strings.TrimSpace(value)
+	const limit = 160
+	runes := []rune(value)
+	if len(runes) <= limit {
+		return value
+	}
+	return "..." + string(runes[len(runes)-limit:])
+}
+
+func previewAssistant(value string) string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return ""
+	}
+
+	paragraphs := splitNonEmptySections(value, "\n\n")
+	if len(paragraphs) > 0 {
+		last := paragraphs[len(paragraphs)-1]
+		if len([]rune(last)) <= 160 {
+			return last
+		}
+	}
+
+	lines := splitNonEmptyLines(value)
+	if len(lines) > 0 {
+		last := lines[len(lines)-1]
+		if len([]rune(last)) <= 160 {
+			return last
+		}
+	}
+
+	return previewTail(value)
+}
+
 func previewAny(value any) string {
 	switch typed := value.(type) {
 	case string:
@@ -673,6 +715,32 @@ func firstNonEmpty(values ...string) string {
 	return ""
 }
 
+func splitNonEmptySections(value, separator string) []string {
+	raw := strings.Split(value, separator)
+	items := make([]string, 0, len(raw))
+	for _, item := range raw {
+		item = strings.TrimSpace(item)
+		if item == "" {
+			continue
+		}
+		items = append(items, item)
+	}
+	return items
+}
+
+func splitNonEmptyLines(value string) []string {
+	raw := strings.Split(value, "\n")
+	items := make([]string, 0, len(raw))
+	for _, item := range raw {
+		item = strings.TrimSpace(item)
+		if item == "" {
+			continue
+		}
+		items = append(items, item)
+	}
+	return items
+}
+
 func summarizeHookEvent(req model.IngestRequest, session *sessionState) string {
 	switch canonicalEvent(req.HookEventName, req.EventName) {
 	case "sessionstart":
@@ -703,7 +771,7 @@ func summarizeHookEvent(req model.IngestRequest, session *sessionState) string {
 			return "turn stopped with error: " + preview(req.Payload.Error)
 		}
 		if session.LastAssistantMessage != "" {
-			return "turn stopped, assistant: " + preview(session.LastAssistantMessage)
+			return "turn stopped, assistant: " + session.LastAssistantMessage
 		}
 		return "turn stopped"
 	default:
@@ -714,7 +782,7 @@ func summarizeHookEvent(req model.IngestRequest, session *sessionState) string {
 func summarizeTranscriptUpdate(update model.TranscriptUpdate) string {
 	switch {
 	case strings.TrimSpace(update.LastAssistantMessage) != "":
-		return "assistant: " + preview(update.LastAssistantMessage)
+		return "assistant: " + previewAssistant(update.LastAssistantMessage)
 	case strings.TrimSpace(update.LastUserPromptPreview) != "":
 		return "user: " + preview(update.LastUserPromptPreview)
 	case strings.TrimSpace(update.LastBashCommand) != "":
