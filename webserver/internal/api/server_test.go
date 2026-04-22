@@ -126,6 +126,84 @@ func TestSessionContinueEndpoint(t *testing.T) {
 	}
 }
 
+func TestSessionContinueEndpointFallsBackToLatestActionableNotification(t *testing.T) {
+	st := store.New(30*time.Second, 0, log.New(io.Discard, "", 0))
+	now := time.Date(2026, 4, 22, 12, 0, 0, 0, time.UTC)
+
+	st.ApplyIngest(model.IngestRequest{
+		EventName:  "session-start",
+		ReceivedAt: now,
+		Payload: model.HookPayload{
+			SessionID: "sess-1",
+			CWD:       "/repo/sidebar",
+		},
+	})
+	st.ApplyIngest(model.IngestRequest{
+		EventName:  "user-prompt-submit",
+		ReceivedAt: now.Add(1 * time.Second),
+		Payload: model.HookPayload{
+			SessionID: "sess-1",
+			Prompt:    "Refactor sidebar",
+		},
+	})
+	st.ApplyIngest(model.IngestRequest{
+		EventName:  "stop",
+		ReceivedAt: now.Add(2 * time.Second),
+		Payload: model.HookPayload{
+			SessionID:            "sess-1",
+			LastAssistantMessage: "Need confirmation before overwriting files",
+			TmuxPane:             "%12",
+		},
+	})
+
+	originalNotifications := st.Notifications()
+	if len(originalNotifications) != 1 {
+		t.Fatalf("expected one notification, got %d", len(originalNotifications))
+	}
+	staleToken := originalNotifications[0].ActionToken
+
+	st.ApplyIngest(model.IngestRequest{
+		EventName:  "user-prompt-submit",
+		ReceivedAt: now.Add(3 * time.Second),
+		Payload: model.HookPayload{
+			SessionID: "sess-1",
+			Prompt:    "Proceed with overwrite",
+		},
+	})
+	st.ApplyIngest(model.IngestRequest{
+		EventName:  "stop",
+		ReceivedAt: now.Add(4 * time.Second),
+		Payload: model.HookPayload{
+			SessionID:            "sess-1",
+			LastAssistantMessage: "Ready to continue after confirmation",
+			TmuxPane:             "%12",
+		},
+	})
+
+	exec := &stubContinueExecutor{}
+	server := NewServer(config.Config{}, st, nil, exec, log.New(io.Discard, "", 0))
+
+	body, err := json.Marshal(map[string]string{"action_token": staleToken})
+	if err != nil {
+		t.Fatalf("marshal body: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/sessions/sess-1/continue", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	resp := httptest.NewRecorder()
+	server.Handler().ServeHTTP(resp, req)
+
+	if resp.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", resp.Code, resp.Body.String())
+	}
+	if !exec.called {
+		t.Fatalf("expected continue executor to be called")
+	}
+	if exec.session.SessionID != "sess-1" {
+		t.Fatalf("unexpected session id: %q", exec.session.SessionID)
+	}
+}
+
 func newAttentionStore(t *testing.T) *store.Store {
 	t.Helper()
 	st := store.New(30*time.Second, 0, log.New(io.Discard, "", 0))
