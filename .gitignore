@@ -57,6 +57,7 @@ Package.resolved
 
 # XcodeGen generated project
 ios/CodexBuddy.xcodeproj/
+ios/project.local.env
 
 # Local Codex / helper state
 .codex

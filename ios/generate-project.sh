@@ -8,6 +8,14 @@ if ! command -v xcodegen >/dev/null 2>&1; then
   exit 1
 fi
 
-xcodegen generate
+specs="project.yml"
+
+if [[ -f project.local.env ]]; then
+  echo "Using local signing overrides from project.local.env"
+  # shellcheck disable=SC1091
+  source project.local.env
+fi
+
+xcodegen generate --spec "$specs"
 
 echo "Generated ios/CodexBuddy.xcodeproj"

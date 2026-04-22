@@ -20,10 +20,12 @@ This directory contains the first public-source version of the iPhone and Apple 
 ## Generate the Xcode project
 
 1. Install XcodeGen on macOS: `brew install xcodegen`
-2. Run `./generate-project.sh`
-3. Open `CodexBuddy.xcodeproj` in Xcode
-4. Set your Personal Team for all targets
+2. Copy `project.local.env.example` to `project.local.env` and set your Apple Developer team there
+3. Run `./generate-project.sh`
+4. Open `CodexBuddy.xcodeproj` in Xcode
 5. Confirm that the shared App Group is available for your signing setup; if not, temporarily fall back to `.standard` storage in `CodexSnapshotStore`
+
+`project.local.env` is intentionally untracked and is loaded before `xcodegen` runs, so regenerating the project does not wipe your local signing configuration.
 
 ## Base URL examples
 

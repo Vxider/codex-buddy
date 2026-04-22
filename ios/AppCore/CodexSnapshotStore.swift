@@ -5,6 +5,13 @@ enum CodexSnapshotStore {
     private static let snapshotKey = "latest_status_snapshot"
     private static let isoDecoder = makeDecoder()
     private static let isoEncoder = makeEncoder()
+    private static let resolvedDefaults: UserDefaults = {
+        guard FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: appGroupID) != nil,
+              let shared = UserDefaults(suiteName: appGroupID) else {
+            return .standard
+        }
+        return shared
+    }()
 
     static func load() -> CodexStatusSnapshot? {
         guard let data = defaults.data(forKey: snapshotKey) else { return nil }
@@ -21,10 +28,7 @@ enum CodexSnapshotStore {
     }
 
     private static var defaults: UserDefaults {
-        if let shared = UserDefaults(suiteName: appGroupID) {
-            return shared
-        }
-        return .standard
+        resolvedDefaults
     }
 }
 
