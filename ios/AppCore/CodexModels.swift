@@ -124,10 +124,21 @@ struct CodexSessionSummary: Codable, Identifiable, Hashable {
 
     var id: String { sessionID }
 
-    var phoneTitle: String {
+    var phoneListTitle: String {
         if let compactTitle, !compactTitle.isEmpty {
             return compactTitle
         }
+        return fallbackTitle
+    }
+
+    var watchListTitle: String {
+        if let microTitle, !microTitle.isEmpty {
+            return microTitle
+        }
+        return fallbackTitle
+    }
+
+    private var fallbackTitle: String {
         if let displayTitle, !displayTitle.isEmpty {
             return displayTitle
         }
@@ -137,12 +148,30 @@ struct CodexSessionSummary: Codable, Identifiable, Hashable {
         return sessionID
     }
 
-    var watchTitle: String {
-        if let microTitle, !microTitle.isEmpty {
-            return microTitle
+    var phoneAssistantSummary: String {
+        if let compactSummary, !compactSummary.isEmpty {
+            return compactSummary
         }
-        return phoneTitle
+        return fallbackSummary
     }
+
+    var watchAssistantSummary: String {
+        if let microSummary, !microSummary.isEmpty {
+            return microSummary
+        }
+        return fallbackSummary
+    }
+
+    private var fallbackSummary: String {
+        if let attentionSummary, !attentionSummary.isEmpty {
+            return attentionSummary
+        }
+        return summary ?? ""
+    }
+
+    var phoneTitle: String { phoneListTitle }
+
+    var watchTitle: String { watchListTitle }
 
     var phoneSummary: String {
         if let compactAttentionSummary, !compactAttentionSummary.isEmpty {
@@ -195,6 +224,26 @@ struct CodexStatusSnapshot: Codable, Hashable {
         case activeSessionMicroTitle = "active_session_micro_title"
         case sessionsCount = "sessions_count"
         case sessions
+    }
+
+    var phoneActiveSessionTitle: String? {
+        if let activeSessionCompactTitle, !activeSessionCompactTitle.isEmpty {
+            return activeSessionCompactTitle
+        }
+        if let activeSessionDisplayTitle, !activeSessionDisplayTitle.isEmpty {
+            return activeSessionDisplayTitle
+        }
+        return activeSessionID
+    }
+
+    var watchActiveSessionTitle: String? {
+        if let activeSessionMicroTitle, !activeSessionMicroTitle.isEmpty {
+            return activeSessionMicroTitle
+        }
+        if let activeSessionDisplayTitle, !activeSessionDisplayTitle.isEmpty {
+            return activeSessionDisplayTitle
+        }
+        return activeSessionID
     }
 
     static let offline = CodexStatusSnapshot(

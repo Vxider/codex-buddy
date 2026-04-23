@@ -5,6 +5,7 @@ final class PhoneAppModel: ObservableObject {
     @Published var snapshot: CodexStatusSnapshot
     @Published var errorMessage: String?
     @Published var isLoading = false
+    @Published private(set) var isOffline: Bool
     @Published private(set) var servers: [CodexBuddyServer]
     @Published private(set) var selectedServerID: UUID?
     private var isSilentRefreshInFlight = false
@@ -14,9 +15,11 @@ final class PhoneAppModel: ObservableObject {
 
     init(api: CodexBuddyAPI = .shared, bridge: CompanionBridge? = nil) {
         let bridge = bridge ?? .shared
+        let initialSnapshot = CodexSnapshotStore.load() ?? .offline
         self.api = api
         self.bridge = bridge
-        self.snapshot = CodexSnapshotStore.load() ?? .offline
+        self.snapshot = initialSnapshot
+        self.isOffline = initialSnapshot.overallState == .offline
         self.servers = api.loadServers()
         self.selectedServerID = api.currentServer()?.id
         bridge.configure(api: api) { [weak self] in
@@ -47,10 +50,12 @@ final class PhoneAppModel: ObservableObject {
                 latest = try await api.loadStatus()
             }
             snapshot = latest
+            isOffline = false
             CodexSnapshotStore.save(latest)
             bridge.push(snapshot: latest)
             errorMessage = nil
         } catch {
+            isOffline = true
             errorMessage = error.localizedDescription
         }
     }
@@ -90,10 +95,12 @@ final class PhoneAppModel: ObservableObject {
         do {
             let latest = try await api.loadStatus()
             snapshot = latest
+            isOffline = false
             CodexSnapshotStore.save(latest)
             bridge.push(snapshot: latest)
             errorMessage = nil
         } catch {
+            isOffline = true
             if reportErrors {
                 errorMessage = error.localizedDescription
             }

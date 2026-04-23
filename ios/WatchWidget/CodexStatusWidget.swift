@@ -3,23 +3,20 @@ import WidgetKit
 
 struct CodexStatusEntry: TimelineEntry {
     let date: Date
-    let snapshot: CodexStatusSnapshot
 }
 
 struct CodexStatusProvider: TimelineProvider {
     func placeholder(in context: Context) -> CodexStatusEntry {
-        CodexStatusEntry(date: Date(), snapshot: .offline)
+        CodexStatusEntry(date: Date())
     }
 
     func getSnapshot(in context: Context, completion: @escaping (CodexStatusEntry) -> Void) {
-        let snapshot = CodexSnapshotStore.load() ?? .offline
-        completion(CodexStatusEntry(date: Date(), snapshot: snapshot))
+        completion(CodexStatusEntry(date: Date()))
     }
 
     func getTimeline(in context: Context, completion: @escaping (Timeline<CodexStatusEntry>) -> Void) {
-        let snapshot = CodexSnapshotStore.load() ?? .offline
-        let entry = CodexStatusEntry(date: Date(), snapshot: snapshot)
-        completion(Timeline(entries: [entry], policy: .after(Date().addingTimeInterval(30 * 60))))
+        let entry = CodexStatusEntry(date: Date())
+        completion(Timeline(entries: [entry], policy: .never))
     }
 }
 
@@ -27,17 +24,23 @@ struct CodexStatusWidgetEntryView: View {
     let entry: CodexStatusEntry
 
     var body: some View {
-        ZStack {
-            AccessoryWidgetBackground()
-            VStack(spacing: 2) {
-                Text(entry.snapshot.overallState.face)
-                    .font(.system(size: 24))
-                Text(entry.snapshot.overallState.displayName)
-                    .font(.system(size: 9, weight: .semibold))
-                    .lineLimit(1)
-            }
+        GeometryReader { proxy in
+            complicationImage(in: proxy.size)
         }
-        .widgetURL(URL(string: "codexbuddy://sessions"))
+    }
+
+    @ViewBuilder
+    private func complicationImage(in size: CGSize) -> some View {
+        Canvas { context, canvasSize in
+            context.clip(to: Path(ellipseIn: CGRect(origin: .zero, size: canvasSize)))
+            let image = context.resolve(Image("WidgetIcon"))
+            context.draw(image, in: CGRect(origin: .zero, size: canvasSize))
+        }
+        .frame(width: size.width, height: size.height)
+        .containerBackground(for: ContainerBackgroundPlacement.widget) {
+            Color.clear
+        }
+        .widgetAccentable(false)
     }
 }
 
@@ -46,9 +49,10 @@ struct CodexStatusWidget: Widget {
     var body: some WidgetConfiguration {
         StaticConfiguration(kind: "CodexStatusWidget", provider: CodexStatusProvider()) { entry in
             CodexStatusWidgetEntryView(entry: entry)
+                .widgetURL(URL(string: "codexbuddy://sessions"))
         }
         .configurationDisplayName("Codex Status")
-        .description("Shows the aggregated Codex state as a face.")
+        .description("Shows the Codex Buddy icon.")
         .supportedFamilies([.accessoryCircular])
     }
 }
