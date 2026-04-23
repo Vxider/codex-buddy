@@ -32,7 +32,7 @@ func TestApplyIngestTransitions(t *testing.T) {
 		ReceivedAt: now.Add(time.Second),
 		Payload: model.HookPayload{
 			SessionID:            "sess-1",
-			LastAssistantMessage: "done",
+			LastAssistantMessage: "Need confirmation before overwriting files",
 		},
 	})
 	if snapshot.OverallState != model.StateAttention {
@@ -45,6 +45,43 @@ func TestApplyIngestTransitions(t *testing.T) {
 	}
 	if session.State != model.StateAttention {
 		t.Fatalf("expected attention to remain active, got %s", session.State)
+	}
+}
+
+func TestCompletedStopStaysIdle(t *testing.T) {
+	st := New(0, 0, log.New(io.Discard, "", 0))
+	now := time.Now().UTC()
+
+	snapshot := st.ApplyIngest(model.IngestRequest{
+		EventName:  "user-prompt-submit",
+		ReceivedAt: now,
+		Payload: model.HookPayload{
+			SessionID: "sess-complete",
+			Prompt:    "merge the PR",
+		},
+	})
+	if snapshot.OverallState != model.StateRunning {
+		t.Fatalf("expected running, got %s", snapshot.OverallState)
+	}
+
+	snapshot = st.ApplyIngest(model.IngestRequest{
+		EventName:  "stop",
+		ReceivedAt: now.Add(time.Second),
+		Payload: model.HookPayload{
+			SessionID:            "sess-complete",
+			LastAssistantMessage: "Completed. PR merged, branch deleted, and worktree is clean.",
+		},
+	})
+	if snapshot.OverallState != model.StateIdle {
+		t.Fatalf("expected idle after completed stop, got %s", snapshot.OverallState)
+	}
+
+	session, ok := st.Session("sess-complete")
+	if !ok {
+		t.Fatalf("expected session")
+	}
+	if session.State != model.StateIdle {
+		t.Fatalf("expected completed session to stay idle, got %s", session.State)
 	}
 }
 

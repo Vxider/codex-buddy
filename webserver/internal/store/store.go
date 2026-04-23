@@ -114,8 +114,8 @@ func (s *Store) ApplyIngest(req model.IngestRequest) model.StatusSnapshot {
 			session.State = model.StateError
 			session.StateDetail = string(model.StateError)
 		} else {
-			session.State = model.StateAttention
-			session.StateDetail = string(model.StateAttention)
+			session.State = stopState(session)
+			session.StateDetail = string(session.State)
 		}
 	default:
 		s.logger.Printf("ignoring unknown event=%q session=%q", event, sessionID)
@@ -427,6 +427,56 @@ func (s *Store) attentionDeadline() time.Time {
 		return time.Time{}
 	}
 	return time.Now().Add(s.attentionHold)
+}
+
+func stopState(session *sessionState) model.State {
+	if session == nil {
+		return model.StateIdle
+	}
+	if needsAttentionFromMessage(session.LastAssistantMessage) {
+		return model.StateAttention
+	}
+	return model.StateIdle
+}
+
+func needsAttentionFromMessage(message string) bool {
+	text := strings.ToLower(strings.TrimSpace(message))
+	if text == "" {
+		return false
+	}
+
+	attentionMarkers := []string{
+		"approval required",
+		"approve",
+		"approval",
+		"need approval",
+		"need confirmation",
+		"confirm ",
+		"confirmation",
+		"waiting for",
+		"before overwriting",
+		"before editing",
+		"before deleting",
+		"before proceeding",
+		"before continuing",
+		"continue after",
+		"would you like me to",
+		"if you'd like me to",
+		"let me know if you want",
+		"please confirm",
+		"please approve",
+	}
+	for _, marker := range attentionMarkers {
+		if strings.Contains(text, marker) {
+			return true
+		}
+	}
+
+	if strings.HasSuffix(text, "?") {
+		return true
+	}
+
+	return false
 }
 
 func (s *Store) reconcileNotificationLocked(session *sessionState, previous, current model.SessionSnapshot, now time.Time) {
