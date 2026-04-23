@@ -16,7 +16,7 @@ final class WatchAppModel: NSObject, ObservableObject {
     }
 
     func refresh() async {
-        await performRequest(kind: "status", extra: [:])
+        await performRequest(kind: "status", extra: [:], reportErrors: true)
     }
 
     func continueSession(_ session: CodexSessionSummary) async {
@@ -27,10 +27,10 @@ final class WatchAppModel: NSObject, ObservableObject {
         await performRequest(kind: "continue", extra: [
             "session_id": session.sessionID,
             "action_token": action.actionToken
-        ])
+        ], reportErrors: true)
     }
 
-    private func performRequest(kind: String, extra: [String: Any]) async {
+    private func performRequest(kind: String, extra: [String: Any], reportErrors: Bool) async {
         isRefreshing = true
         defer { isRefreshing = false }
         do {
@@ -38,7 +38,9 @@ final class WatchAppModel: NSObject, ObservableObject {
             apply(snapshot: snapshot)
             errorMessage = nil
         } catch {
-            errorMessage = error.localizedDescription
+            if reportErrors {
+                errorMessage = error.localizedDescription
+            }
         }
     }
 

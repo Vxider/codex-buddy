@@ -3,6 +3,7 @@ import SwiftUI
 struct PhoneContentView: View {
     @ObservedObject var model: PhoneAppModel
     @State private var showSettings = false
+    @State private var presentedErrorMessage: String?
     @Environment(\.scenePhase) private var scenePhase
 
     var body: some View {
@@ -53,13 +54,22 @@ struct PhoneContentView: View {
                     showSettings = true
                 }
             }
+            .onChange(of: model.errorMessage) { _, newValue in
+                presentedErrorMessage = newValue
+            }
             .alert("Connection Error", isPresented: Binding(
-                get: { model.errorMessage != nil },
-                set: { if !$0 { model.errorMessage = nil } }
+                get: { presentedErrorMessage != nil },
+                set: { isPresented in
+                    guard !isPresented else { return }
+                    presentedErrorMessage = nil
+                    Task { @MainActor in
+                        model.errorMessage = nil
+                    }
+                }
             )) {
                 Button("OK", role: .cancel) {}
             } message: {
-                Text(model.errorMessage ?? "Unknown error")
+                Text(presentedErrorMessage ?? "Unknown error")
             }
         }
     }
@@ -70,20 +80,15 @@ struct PhoneContentView: View {
                 Text(model.snapshot.overallState.face)
                     .font(.system(size: 36))
                 VStack(alignment: .leading, spacing: 4) {
-                    Text(model.snapshot.overallState.displayName)
+                    Text(model.isOffline ? CodexState.offline.displayName : model.snapshot.overallState.displayName)
                         .font(.headline)
-                    Text(model.snapshot.activeSessionCompactTitle ?? model.snapshot.activeSessionDisplayTitle ?? model.snapshot.activeSessionID ?? "No active session")
+                    Text(model.snapshot.phoneActiveSessionTitle ?? "No active session")
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
                     Text("Updated \(CodexFormatters.shortTime(model.snapshot.serverTime))")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
-            }
-            if let detail = model.snapshot.overallStateDetail, !detail.isEmpty {
-                Text(detail)
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
             }
         }
     }
@@ -98,21 +103,17 @@ struct PhoneContentView: View {
                     VStack(alignment: .leading, spacing: 8) {
                         HStack(alignment: .top) {
                             VStack(alignment: .leading, spacing: 4) {
-                                Text(session.phoneTitle)
+                                Text(session.phoneListTitle)
                                     .font(.headline)
                                 Text(session.shortSessionID ?? CodexFormatters.shortSessionLabel(session.sessionID))
                                     .font(.caption)
                                     .foregroundStyle(.secondary)
                             }
                             Spacer()
-                            Text(session.state.face)
-                                .font(.title3)
-                            Text(session.state.displayName)
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
+                            sessionStateBadge(session.state)
                         }
-                        if !session.phoneSummary.isEmpty {
-                            Text(session.phoneSummary)
+                        if !session.phoneAssistantSummary.isEmpty {
+                            Text(session.phoneAssistantSummary)
                                 .font(.subheadline)
                         }
                         HStack {
@@ -125,6 +126,7 @@ struct PhoneContentView: View {
                                     Task { await model.continueSession(session) }
                                 }
                                 .buttonStyle(.borderedProminent)
+                                .tint(.teal)
                                 .controlSize(.small)
                             }
                         }
@@ -134,13 +136,47 @@ struct PhoneContentView: View {
             }
         }
     }
+
+    private func sessionStateBadge(_ state: CodexState) -> some View {
+        let tint = state.badgeColor
+
+        return Text(state.displayName)
+            .font(.caption.weight(.bold))
+        .padding(.horizontal, 10)
+        .padding(.vertical, 6)
+        .foregroundStyle(.white)
+        .background(tint.gradient, in: Capsule())
+        .overlay {
+            Capsule()
+                .strokeBorder(tint.opacity(0.55), lineWidth: 1)
+        }
+        .shadow(color: tint.opacity(0.28), radius: 8, y: 2)
+    }
+}
+
+private extension CodexState {
+    var badgeColor: Color {
+        switch normalized {
+        case .offline:
+            return .gray
+        case .idle:
+            return .green
+        case .running:
+            return .blue
+        case .attention:
+            return .orange
+        case .error:
+            return .red
+        case .runningBash:
+            return .blue
+        }
+    }
 }
 
 struct ServerSettingsView: View {
     @ObservedObject var model: PhoneAppModel
     @Environment(\.dismiss) private var dismiss
-    @State private var showEditor = false
-    @State private var editingServer: CodexBuddyServer?
+    @State private var editorDestination: ServerEditorDestination?
 
     var body: some View {
         NavigationStack {
@@ -187,8 +223,7 @@ struct ServerSettingsView: View {
                             .buttonStyle(.plain)
                             .swipeActions(edge: .trailing, allowsFullSwipe: false) {
                                 Button("Edit") {
-                                    editingServer = server
-                                    showEditor = true
+                                    editorDestination = .edit(server)
                                 }
                                 Button("Delete", role: .destructive) {
                                     model.deleteServer(server)
@@ -205,16 +240,38 @@ struct ServerSettingsView: View {
                 }
                 ToolbarItem(placement: .topBarTrailing) {
                     Button {
-                        editingServer = nil
-                        showEditor = true
+                        editorDestination = .add
                     } label: {
                         Image(systemName: "plus")
                     }
                 }
             }
-            .sheet(isPresented: $showEditor) {
-                ServerEditorView(model: model, editingServer: editingServer)
+            .sheet(item: $editorDestination) { destination in
+                ServerEditorView(model: model, editingServer: destination.server)
             }
+        }
+    }
+}
+
+private enum ServerEditorDestination: Identifiable {
+    case add
+    case edit(CodexBuddyServer)
+
+    var id: String {
+        switch self {
+        case .add:
+            return "add"
+        case let .edit(server):
+            return "edit-\(server.id.uuidString)"
+        }
+    }
+
+    var server: CodexBuddyServer? {
+        switch self {
+        case .add:
+            return nil
+        case let .edit(server):
+            return server
         }
     }
 }
@@ -269,7 +326,10 @@ private struct ServerEditorView: View {
             }
             .alert("Invalid Server", isPresented: Binding(
                 get: { errorMessage != nil },
-                set: { if !$0 { errorMessage = nil } }
+                set: { isPresented in
+                    guard !isPresented else { return }
+                    errorMessage = nil
+                }
             )) {
                 Button("OK", role: .cancel) {}
             } message: {

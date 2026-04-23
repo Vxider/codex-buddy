@@ -2,6 +2,7 @@ import SwiftUI
 
 struct WatchContentView: View {
     @ObservedObject var model: WatchAppModel
+    @State private var presentedErrorMessage: String?
     @Environment(\.scenePhase) private var scenePhase
 
     var body: some View {
@@ -13,7 +14,7 @@ struct WatchContentView: View {
                     VStack(alignment: .leading, spacing: 2) {
                         Text(model.snapshot.overallState.displayName)
                             .font(.headline)
-                        Text(model.snapshot.activeSessionMicroTitle ?? model.snapshot.activeSessionCompactTitle ?? model.snapshot.activeSessionDisplayTitle ?? model.snapshot.activeSessionID ?? "No active session")
+                        Text(model.snapshot.watchActiveSessionTitle ?? "No active session")
                             .font(.caption2)
                             .foregroundStyle(.secondary)
                     }
@@ -42,15 +43,15 @@ struct WatchContentView: View {
                             HStack(alignment: .top) {
                                 Text(session.state.face)
                                 VStack(alignment: .leading, spacing: 2) {
-                                    Text(session.watchTitle)
+                                    Text(session.watchListTitle)
                                         .font(.headline)
                                     Text(session.shortSessionID ?? CodexFormatters.shortSessionLabel(session.sessionID))
                                         .font(.caption2)
                                         .foregroundStyle(.secondary)
                                 }
                             }
-                            if !session.watchSummary.isEmpty {
-                                Text(session.watchSummary)
+                            if !session.watchAssistantSummary.isEmpty {
+                                Text(session.watchAssistantSummary)
                                     .font(.caption)
                             }
                             HStack {
@@ -63,6 +64,7 @@ struct WatchContentView: View {
                                         Task { await model.continueSession(session) }
                                     }
                                     .buttonStyle(.borderedProminent)
+                                    .tint(.teal)
                                 }
                             }
                         }
@@ -72,25 +74,24 @@ struct WatchContentView: View {
             }
         }
         .navigationTitle("Codex")
-        .task {
-            if model.snapshot.sessions.isEmpty {
-                await model.refresh()
-            }
-        }
-        .onOpenURL { _ in
-            Task { await model.refresh() }
-        }
-        .onChange(of: scenePhase) { _, newPhase in
-            guard newPhase == .active else { return }
-            Task { await model.refresh() }
+        .onOpenURL { _ in }
+        .onChange(of: scenePhase) { _, _ in }
+        .onChange(of: model.errorMessage) { _, newValue in
+            presentedErrorMessage = newValue
         }
         .alert("Bridge Error", isPresented: Binding(
-            get: { model.errorMessage != nil },
-            set: { if !$0 { model.errorMessage = nil } }
+            get: { presentedErrorMessage != nil },
+            set: { isPresented in
+                guard !isPresented else { return }
+                presentedErrorMessage = nil
+                Task { @MainActor in
+                    model.errorMessage = nil
+                }
+            }
         )) {
             Button("OK", role: .cancel) {}
         } message: {
-            Text(model.errorMessage ?? "Unknown error")
+            Text(presentedErrorMessage ?? "Unknown error")
         }
     }
 }

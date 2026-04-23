@@ -55,7 +55,7 @@ targets:
         PRODUCT_BUNDLE_IDENTIFIER: com.vxider.codexbuddy.phone.watchapp
         INFOPLIST_FILE: WatchApp/Info.plist
         CODE_SIGN_ENTITLEMENTS: WatchApp/CodexBuddyWatch.entitlements
-        ASSETCATALOG_COMPILER_APPICON_NAME: ""
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         WK_COMPANION_APP_BUNDLE_IDENTIFIER: com.vxider.codexbuddy.phone
     dependencies:
       - target: CodexStatusWidget
