@@ -2,7 +2,10 @@ package transcript
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/vxider/codex-buddy/internal/model"
 )
@@ -60,5 +63,56 @@ func TestHasUsefulTranscriptUpdate(t *testing.T) {
 	}
 	if !hasUsefulTranscriptUpdate(model.TranscriptUpdate{SessionID: "sess-1", LastAssistantMessage: "ok"}) {
 		t.Fatalf("assistant message should be useful")
+	}
+}
+
+func TestRecoverSessionRestoresLatestTranscriptContext(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "rollout-2026-04-24T21-56-57-sess-1.jsonl")
+	content := "" +
+		"{\"timestamp\":\"2026-04-24T21:56:57Z\",\"type\":\"turn_context\",\"payload\":{\"turn_id\":\"turn-1\",\"cwd\":\"/repo/app\",\"model\":\"gpt-5.4\"}}\n" +
+		fmt.Sprintf("{\"timestamp\":\"2026-04-24T21:57:00Z\",\"type\":\"event_msg\",\"payload\":{\"type\":\"user_message\",\"message\":\"%s\"}}\n", model.ContinueCommandText) +
+		"{\"timestamp\":\"2026-04-24T21:57:02Z\",\"type\":\"response_item\",\"payload\":{\"type\":\"message\",\"role\":\"assistant\",\"content\":[{\"type\":\"output_text\",\"text\":\"Need confirmation before overwriting files\"}]}}\n"
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatalf("write transcript: %v", err)
+	}
+
+	update, err := RecoverSession(path, "sess-1")
+	if err != nil {
+		t.Fatalf("recover session: %v", err)
+	}
+	if update.SessionID != "sess-1" {
+		t.Fatalf("unexpected session id: %q", update.SessionID)
+	}
+	if update.CWD != "/repo/app" {
+		t.Fatalf("unexpected cwd: %q", update.CWD)
+	}
+	if update.Model != "gpt-5.4" {
+		t.Fatalf("unexpected model: %q", update.Model)
+	}
+	if update.LastUserPromptPreview != model.ContinueCommandText {
+		t.Fatalf("unexpected prompt preview: %q", update.LastUserPromptPreview)
+	}
+	if update.LastAssistantMessage != "Need confirmation before overwriting files" {
+		t.Fatalf("unexpected assistant message: %q", update.LastAssistantMessage)
+	}
+	if update.UpdatedAt.Before(time.Date(2026, 4, 24, 21, 57, 2, 0, time.UTC)) {
+		t.Fatalf("expected updated time to reflect latest entry, got %s", update.UpdatedAt)
+	}
+}
+
+func TestMergeUpdateClearsHistoricalErrorAfterLaterProgress(t *testing.T) {
+	dst := model.TranscriptUpdate{
+		SessionID: "sess-1",
+		Error:     "old error",
+	}
+
+	mergeUpdate(&dst, model.TranscriptUpdate{
+		SessionID:            "sess-1",
+		LastAssistantMessage: "later assistant output",
+	})
+
+	if dst.Error != "" {
+		t.Fatalf("expected later non-error progress to clear stale error, got %q", dst.Error)
 	}
 }

@@ -22,6 +22,10 @@ type stubContinueExecutor struct {
 	text    string
 }
 
+type stubSessionOpenChecker struct {
+	open map[string]bool
+}
+
 func (s *stubContinueExecutor) Continue(session model.SessionSnapshot, text string) error {
 	s.called = true
 	s.session = session
@@ -29,9 +33,20 @@ func (s *stubContinueExecutor) Continue(session model.SessionSnapshot, text stri
 	return nil
 }
 
+func (s stubSessionOpenChecker) IsOpen(session model.SessionSnapshot) bool {
+	if s.open == nil {
+		return true
+	}
+	open, ok := s.open[session.SessionID]
+	if !ok {
+		return true
+	}
+	return open
+}
+
 func TestStatusIncludesAttentionSummaryAndContinueAction(t *testing.T) {
 	st := newAttentionStore(t)
-	server := NewServer(config.Config{}, st, nil, &stubContinueExecutor{}, log.New(io.Discard, "", 0))
+	server := NewServer(config.Config{}, st, nil, &stubContinueExecutor{}, nil, log.New(io.Discard, "", 0))
 
 	req := httptest.NewRequest(http.MethodGet, "/v1/status", nil)
 	resp := httptest.NewRecorder()
@@ -110,7 +125,7 @@ func TestStatusTitleDoesNotReuseAssistantSummary(t *testing.T) {
 		},
 	})
 
-	server := NewServer(config.Config{}, st, nil, &stubContinueExecutor{}, log.New(io.Discard, "", 0))
+	server := NewServer(config.Config{}, st, nil, &stubContinueExecutor{}, nil, log.New(io.Discard, "", 0))
 	req := httptest.NewRequest(http.MethodGet, "/v1/status", nil)
 	resp := httptest.NewRecorder()
 	server.Handler().ServeHTTP(resp, req)
@@ -160,7 +175,7 @@ func TestStatusTitleDoesNotUseBashCommandFallback(t *testing.T) {
 		UpdatedAt:       now.Add(time.Second),
 	})
 
-	server := NewServer(config.Config{}, st, nil, &stubContinueExecutor{}, log.New(io.Discard, "", 0))
+	server := NewServer(config.Config{}, st, nil, &stubContinueExecutor{}, nil, log.New(io.Discard, "", 0))
 	req := httptest.NewRequest(http.MethodGet, "/v1/status", nil)
 	resp := httptest.NewRecorder()
 	server.Handler().ServeHTTP(resp, req)
@@ -210,7 +225,7 @@ func TestStatusTitleSkipsCommandLikePrompt(t *testing.T) {
 		},
 	})
 
-	server := NewServer(config.Config{}, st, nil, &stubContinueExecutor{}, log.New(io.Discard, "", 0))
+	server := NewServer(config.Config{}, st, nil, &stubContinueExecutor{}, nil, log.New(io.Discard, "", 0))
 	req := httptest.NewRequest(http.MethodGet, "/v1/status", nil)
 	resp := httptest.NewRecorder()
 	server.Handler().ServeHTTP(resp, req)
@@ -254,7 +269,7 @@ func TestStatusTitlesDisambiguateDuplicateWorkspaces(t *testing.T) {
 		},
 	})
 
-	server := NewServer(config.Config{}, st, nil, &stubContinueExecutor{}, log.New(io.Discard, "", 0))
+	server := NewServer(config.Config{}, st, nil, &stubContinueExecutor{}, nil, log.New(io.Discard, "", 0))
 	req := httptest.NewRequest(http.MethodGet, "/v1/status", nil)
 	resp := httptest.NewRecorder()
 	server.Handler().ServeHTTP(resp, req)
@@ -314,7 +329,7 @@ func TestStatusIncludesCompactMobileFields(t *testing.T) {
 		},
 	})
 
-	server := NewServer(config.Config{}, st, nil, &stubContinueExecutor{}, log.New(io.Discard, "", 0))
+	server := NewServer(config.Config{}, st, nil, &stubContinueExecutor{}, nil, log.New(io.Discard, "", 0))
 	req := httptest.NewRequest(http.MethodGet, "/v1/status", nil)
 	resp := httptest.NewRecorder()
 	server.Handler().ServeHTTP(resp, req)
@@ -373,10 +388,51 @@ func TestStatusIncludesCompactMobileFields(t *testing.T) {
 	}
 }
 
+func TestStatusErrorSummaryPrefersReadableCommandFailure(t *testing.T) {
+	st := store.New(30*time.Second, 0, log.New(io.Discard, "", 0))
+	now := time.Date(2026, 4, 25, 1, 0, 0, 0, time.UTC)
+
+	st.ApplyIngest(model.IngestRequest{
+		EventName:  "session-start",
+		ReceivedAt: now,
+		Payload: model.HookPayload{
+			SessionID: "sess-error",
+			CWD:       "/repo/payments",
+			TmuxPane:  "%44",
+		},
+	})
+	st.ApplyTranscriptUpdate(model.TranscriptUpdate{
+		SessionID:       "sess-error",
+		LastBashCommand: "go test ./webserver/...",
+		Error:           "FAIL\tgithub.com/vxider/codex-buddy/webserver/internal/api\t0.007s",
+		UpdatedAt:       now.Add(time.Second),
+	})
+
+	server := NewServer(config.Config{}, st, nil, &stubContinueExecutor{}, nil, log.New(io.Discard, "", 0))
+	req := httptest.NewRequest(http.MethodGet, "/v1/status", nil)
+	resp := httptest.NewRecorder()
+	server.Handler().ServeHTTP(resp, req)
+
+	if resp.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", resp.Code)
+	}
+
+	var out publicStatus
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		t.Fatalf("decode status: %v", err)
+	}
+	if len(out.Sessions) != 1 {
+		t.Fatalf("expected one session, got %d", len(out.Sessions))
+	}
+	if out.Sessions[0].Summary != "Command failed: go test ./webserver/..." {
+		t.Fatalf("unexpected error summary: %q", out.Sessions[0].Summary)
+	}
+}
+
 func TestSessionContinueEndpoint(t *testing.T) {
 	st := newAttentionStore(t)
 	exec := &stubContinueExecutor{}
-	server := NewServer(config.Config{}, st, nil, exec, log.New(io.Discard, "", 0))
+	server := NewServer(config.Config{}, st, nil, exec, nil, log.New(io.Discard, "", 0))
 
 	notifications := st.Notifications()
 	if len(notifications) != 1 {
@@ -479,7 +535,7 @@ func TestSessionContinueEndpointFallsBackToLatestActionableNotification(t *testi
 	})
 
 	exec := &stubContinueExecutor{}
-	server := NewServer(config.Config{}, st, nil, exec, log.New(io.Discard, "", 0))
+	server := NewServer(config.Config{}, st, nil, exec, nil, log.New(io.Discard, "", 0))
 
 	body, err := json.Marshal(map[string]string{"action_token": staleToken})
 	if err != nil {
@@ -499,6 +555,121 @@ func TestSessionContinueEndpointFallsBackToLatestActionableNotification(t *testi
 	}
 	if exec.session.SessionID != "sess-1" {
 		t.Fatalf("unexpected session id: %q", exec.session.SessionID)
+	}
+}
+
+func TestStatusHidesSessionsThatAreNoLongerOpen(t *testing.T) {
+	st := store.New(30*time.Second, 0, log.New(io.Discard, "", 0))
+	now := time.Date(2026, 4, 25, 9, 0, 0, 0, time.UTC)
+
+	st.ApplyIngest(model.IngestRequest{
+		EventName:  "session-start",
+		ReceivedAt: now,
+		Payload: model.HookPayload{
+			SessionID: "sess-hidden",
+			CWD:       "/repo/hidden",
+			TmuxPane:  "%20",
+		},
+	})
+	st.ApplyIngest(model.IngestRequest{
+		EventName:  "session-start",
+		ReceivedAt: now.Add(time.Second),
+		Payload: model.HookPayload{
+			SessionID: "sess-visible",
+			CWD:       "/repo/visible",
+			TmuxPane:  "%21",
+		},
+	})
+
+	server := NewServer(
+		config.Config{},
+		st,
+		nil,
+		&stubContinueExecutor{},
+		stubSessionOpenChecker{open: map[string]bool{
+			"sess-hidden":  false,
+			"sess-visible": true,
+		}},
+		log.New(io.Discard, "", 0),
+	)
+
+	req := httptest.NewRequest(http.MethodGet, "/v1/status", nil)
+	resp := httptest.NewRecorder()
+	server.Handler().ServeHTTP(resp, req)
+
+	if resp.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", resp.Code)
+	}
+
+	var out publicStatus
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		t.Fatalf("decode status: %v", err)
+	}
+	if out.SessionsCount != 1 {
+		t.Fatalf("expected one visible session, got %d", out.SessionsCount)
+	}
+	if len(out.Sessions) != 1 {
+		t.Fatalf("expected one visible session item, got %d", len(out.Sessions))
+	}
+	if out.ActiveSessionID != "sess-visible" {
+		t.Fatalf("expected visible session to become active, got %q", out.ActiveSessionID)
+	}
+	if out.Sessions[0].SessionID != "sess-visible" {
+		t.Fatalf("expected only visible session in list, got %q", out.Sessions[0].SessionID)
+	}
+}
+
+func TestNotificationsHideSessionsThatAreNoLongerOpen(t *testing.T) {
+	st := newAttentionStore(t)
+	server := NewServer(
+		config.Config{},
+		st,
+		nil,
+		&stubContinueExecutor{},
+		stubSessionOpenChecker{open: map[string]bool{
+			"sess-1": false,
+		}},
+		log.New(io.Discard, "", 0),
+	)
+
+	req := httptest.NewRequest(http.MethodGet, "/v1/notifications", nil)
+	resp := httptest.NewRecorder()
+	server.Handler().ServeHTTP(resp, req)
+
+	if resp.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", resp.Code)
+	}
+
+	var out struct {
+		Notifications []publicNotification `json:"notifications"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		t.Fatalf("decode notifications: %v", err)
+	}
+	if len(out.Notifications) != 0 {
+		t.Fatalf("expected hidden session notifications to be filtered, got %d", len(out.Notifications))
+	}
+}
+
+func TestHiddenSessionReturnsNotFound(t *testing.T) {
+	st := newAttentionStore(t)
+	server := NewServer(
+		config.Config{},
+		st,
+		nil,
+		&stubContinueExecutor{},
+		stubSessionOpenChecker{open: map[string]bool{
+			"sess-1": false,
+		}},
+		log.New(io.Discard, "", 0),
+	)
+
+	req := httptest.NewRequest(http.MethodGet, "/v1/sessions/sess-1", nil)
+	resp := httptest.NewRecorder()
+	server.Handler().ServeHTTP(resp, req)
+
+	if resp.Code != http.StatusNotFound {
+		t.Fatalf("expected 404 for hidden session, got %d", resp.Code)
 	}
 }
 

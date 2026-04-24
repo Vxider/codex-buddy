@@ -81,6 +81,39 @@ func (m *Manager) Ensure(sessionID, path string) {
 	go m.run(w)
 }
 
+func RecoverSession(path, sessionID string) (model.TranscriptUpdate, error) {
+	file, err := os.Open(path)
+	if err != nil {
+		return model.TranscriptUpdate{}, err
+	}
+	defer file.Close()
+
+	scanner := bufio.NewScanner(file)
+	buffer := make([]byte, 0, 64*1024)
+	scanner.Buffer(buffer, 1024*1024)
+
+	var out model.TranscriptUpdate
+	for scanner.Scan() {
+		line := bytes.TrimSpace(scanner.Bytes())
+		if len(line) == 0 {
+			continue
+		}
+		update, ok := parseLine(sessionID, line)
+		if !ok {
+			continue
+		}
+		mergeUpdate(&out, update)
+	}
+	if err := scanner.Err(); err != nil {
+		return model.TranscriptUpdate{}, err
+	}
+
+	if out.SessionID == "" {
+		out.SessionID = sessionID
+	}
+	return out, nil
+}
+
 func (m *Manager) Snapshot() map[string]string {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -262,6 +295,50 @@ func parseLine(sessionID string, line []byte) (model.TranscriptUpdate, bool) {
 	default:
 		return model.TranscriptUpdate{}, false
 	}
+}
+
+func mergeUpdate(dst *model.TranscriptUpdate, src model.TranscriptUpdate) {
+	if dst == nil {
+		return
+	}
+	if dst.SessionID == "" {
+		dst.SessionID = src.SessionID
+	}
+	if src.TurnID != "" {
+		dst.TurnID = src.TurnID
+	}
+	if src.CWD != "" {
+		dst.CWD = src.CWD
+	}
+	if src.Model != "" {
+		dst.Model = src.Model
+	}
+	if src.LastUserPromptPreview != "" {
+		dst.LastUserPromptPreview = src.LastUserPromptPreview
+	}
+	if src.LastAssistantMessage != "" {
+		dst.LastAssistantMessage = src.LastAssistantMessage
+	}
+	if src.LastBashCommand != "" {
+		dst.LastBashCommand = src.LastBashCommand
+	}
+	if src.Error != "" {
+		dst.Error = src.Error
+	} else if hasNonErrorProgress(src) {
+		dst.Error = ""
+	}
+	if src.UpdatedAt.After(dst.UpdatedAt) {
+		dst.UpdatedAt = src.UpdatedAt
+	}
+}
+
+func hasNonErrorProgress(update model.TranscriptUpdate) bool {
+	return update.TurnID != "" ||
+		update.CWD != "" ||
+		update.Model != "" ||
+		update.LastUserPromptPreview != "" ||
+		update.LastAssistantMessage != "" ||
+		update.LastBashCommand != ""
 }
 
 func joinContent(parts []contentFragment) string {

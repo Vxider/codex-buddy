@@ -211,3 +211,34 @@ func TestPreviewAssistantPrefersTailContext(t *testing.T) {
 		t.Fatalf("expected assistant preview to avoid the long leading setup text, got %q", output)
 	}
 }
+
+func TestErrorNotificationUsesReadableCommandFailure(t *testing.T) {
+	st := New(30*time.Second, 0, log.New(io.Discard, "", 0))
+	now := time.Now().UTC()
+
+	st.ApplyIngest(model.IngestRequest{
+		EventName:  "session-start",
+		ReceivedAt: now,
+		Payload: model.HookPayload{
+			SessionID: "sess-error",
+			TmuxPane:  "%1",
+		},
+	})
+	st.ApplyTranscriptUpdate(model.TranscriptUpdate{
+		SessionID:       "sess-error",
+		LastBashCommand: "npm test",
+		Error:           "FAIL\tapi",
+		UpdatedAt:       now.Add(time.Second),
+	})
+
+	items := st.Notifications()
+	if len(items) != 1 {
+		t.Fatalf("expected one notification, got %d", len(items))
+	}
+	if items[0].Title != "Command failed" {
+		t.Fatalf("unexpected notification title: %q", items[0].Title)
+	}
+	if items[0].Summary != "Command failed: npm test" {
+		t.Fatalf("unexpected notification summary: %q", items[0].Summary)
+	}
+}
