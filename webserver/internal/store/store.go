@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/vxider/codex-buddy/internal/model"
+	"github.com/vxider/codex-buddy/webserver/internal/present"
 )
 
 type Store struct {
@@ -651,7 +652,7 @@ func notificationActionToken(sessionID string, epoch int) string {
 func notificationTitle(session model.SessionSnapshot) string {
 	switch session.State {
 	case model.StateError:
-		return "Codex error"
+		return present.ErrorTitle(session)
 	default:
 		return "Codex finished"
 	}
@@ -660,7 +661,7 @@ func notificationTitle(session model.SessionSnapshot) string {
 func notificationSummary(session model.SessionSnapshot) string {
 	switch session.State {
 	case model.StateError:
-		return firstNonEmpty(session.LastError, session.LastAssistantMessage, session.LastUserPromptPreview)
+		return present.ErrorSummary(session)
 	case model.StateAttention:
 		return firstNonEmpty(session.LastAssistantMessage, session.LastUserPromptPreview)
 	default:

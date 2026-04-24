@@ -14,6 +14,7 @@ import (
 	"github.com/vxider/codex-buddy/internal/config"
 	"github.com/vxider/codex-buddy/internal/model"
 	"github.com/vxider/codex-buddy/webserver/internal/control"
+	"github.com/vxider/codex-buddy/webserver/internal/present"
 	"github.com/vxider/codex-buddy/webserver/internal/store"
 	"github.com/vxider/codex-buddy/webserver/internal/transcript"
 )
@@ -609,6 +610,9 @@ func workspaceBaseTitle(session model.SessionSnapshot) string {
 }
 
 func sessionSummary(session model.SessionSnapshot) string {
+	if session.State == model.StateError {
+		return present.ErrorSummary(session)
+	}
 	return firstNonEmpty(session.LastError, session.LastAssistantMessage, session.LastBashCommand, session.LastUserPromptPreview)
 }
 
