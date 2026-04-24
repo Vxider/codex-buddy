@@ -29,18 +29,50 @@ struct CodexStatusWidgetEntryView: View {
         }
     }
 
-    @ViewBuilder
     private func complicationImage(in size: CGSize) -> some View {
-        Canvas { context, canvasSize in
-            context.clip(to: Path(ellipseIn: CGRect(origin: .zero, size: canvasSize)))
-            let image = context.resolve(Image("WidgetIcon"))
-            context.draw(image, in: CGRect(origin: .zero, size: canvasSize))
+        widgetGlyph(in: size)
+            .frame(width: size.width * 0.82, height: size.height * 0.82)
+            .foregroundStyle(.white)
+            .widgetAccentable()
+            .frame(width: size.width, height: size.height)
+            .containerBackground(for: .widget) {
+                Color.clear
+            }
+    }
+
+    private func widgetGlyph(in size: CGSize) -> some View {
+        let iconSize = min(size.width, size.height)
+        let stroke = iconSize * 0.045
+        let eyeSize = iconSize * 0.145
+        let eyeOffsetX = iconSize * 0.16
+        let eyeOffsetY = -iconSize * 0.14
+        let mouthWidth = iconSize * 0.28
+        let mouthHeight = stroke
+        let mouthOffsetY = iconSize * 0.14
+
+        return ZStack {
+            Circle()
+                .stroke(style: StrokeStyle(lineWidth: stroke, lineCap: .round, lineJoin: .round))
+
+            Circle()
+                .frame(width: eyeSize, height: eyeSize)
+                .offset(x: -eyeOffsetX, y: eyeOffsetY)
+
+            Circle()
+                .frame(width: eyeSize, height: eyeSize)
+                .offset(x: eyeOffsetX, y: eyeOffsetY)
+
+            Capsule(style: .circular)
+                .frame(width: mouthWidth, height: mouthHeight)
+                .rotationEffect(.degrees(45))
+                .offset(y: mouthOffsetY)
+
+            Capsule(style: .circular)
+                .frame(width: mouthWidth, height: mouthHeight)
+                .rotationEffect(.degrees(-45))
+                .offset(y: mouthOffsetY)
         }
-        .frame(width: size.width, height: size.height)
-        .containerBackground(for: ContainerBackgroundPlacement.widget) {
-            Color.clear
-        }
-        .widgetAccentable(false)
+        .padding(stroke * 0.55)
     }
 }
 
