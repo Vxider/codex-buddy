@@ -16,8 +16,6 @@ import (
 	"fyne.io/fyne/v2/canvas"
 	"fyne.io/fyne/v2/container"
 	"fyne.io/fyne/v2/dialog"
-	desktop "fyne.io/fyne/v2/driver/desktop"
-	"fyne.io/fyne/v2/layout"
 	"fyne.io/fyne/v2/theme"
 	"fyne.io/fyne/v2/widget"
 
@@ -27,39 +25,38 @@ import (
 )
 
 type App struct {
-	cfg         config.UConsoleConfig
-	logger      *log.Logger
-	client      *Client
-	fyneApp     fyne.App
-	window      fyne.Window
-	lightRunner *light.Runner
-	stateMu     sync.RWMutex
-	lastStatus  StatusResponse
-	lastNotifs  []NotificationResponse
-	connected   bool
-	statusLine  string
-	lastError   string
-	lastSuccess time.Time
-	holdMu      sync.Mutex
-	holdTimer   *time.Timer
-	holdActive  bool
+	cfg          config.UConsoleConfig
+	logger       *log.Logger
+	client       *Client
+	fyneApp      fyne.App
+	window       fyne.Window
+	lightRunner  *light.Runner
+	stateMu      sync.RWMutex
+	lastStatus   StatusResponse
+	lastNotifs   []NotificationResponse
+	connected    bool
+	statusLine   string
+	lastError    string
+	lastSuccess  time.Time
+	shownNotifID string
+	dialogNotifID string
+	notifDialog   dialog.Dialog
+	statusUntil   time.Time
+	darkMode      bool
 
+	bgFill          *canvas.Rectangle
 	badgeFill       *canvas.Rectangle
-	badgeLabel      *widget.Label
+	badgeLabel      *canvas.Text
 	titleLabel      *widget.Label
 	summaryLabel    *widget.Label
 	activeLabel     *widget.Label
 	updatedLabel    *widget.Label
 	connectionLabel *widget.Label
 	statusLabel     *widget.Label
-	sessionList     *widget.Label
-	cardTitle       *widget.Label
-	cardSession     *widget.Label
-	cardSummary     *widget.Label
-	cardMeta        *widget.Label
-	ackButton       *widget.Button
-	continueButton  *widget.Button
+	sessionList     *fyne.Container
+	themeButton     *widget.Button
 	refreshButton   *widget.Button
+	rootScroll      *container.Scroll
 }
 
 func Run(ctx context.Context, cfg config.UConsoleConfig, logger *log.Logger) error {
@@ -72,13 +69,15 @@ func Run(ctx context.Context, cfg config.UConsoleConfig, logger *log.Logger) err
 		statusLine: "Connecting to codex-buddy",
 	}
 
-	gui.fyneApp = app.NewWithID("github.com.vxider.codex-buddy.uconsole")
+	gui.fyneApp = app.New()
+	gui.applyTheme()
 	gui.window = gui.fyneApp.NewWindow("codex-buddy uConsole")
 	gui.window.SetMaster()
 	if cfg.Window.Fullscreen {
 		gui.window.SetFullScreen(true)
 	} else {
-		gui.window.Resize(fyne.NewSize(float32(cfg.Window.Width), float32(cfg.Window.Height)))
+		width, height := normalizedWindowSize(cfg.Window.Width, cfg.Window.Height)
+		gui.window.Resize(fyne.NewSize(float32(width), float32(height)))
 	}
 	gui.window.SetContent(gui.buildUI())
 
@@ -118,79 +117,72 @@ func Run(ctx context.Context, cfg config.UConsoleConfig, logger *log.Logger) err
 }
 
 func (a *App) buildUI() fyne.CanvasObject {
-	bg := canvas.NewRectangle(color.NRGBA{R: 0xF2, G: 0xEA, B: 0xD8, A: 0xFF})
+	a.bgFill = canvas.NewRectangle(color.NRGBA{R: 0xFF, G: 0xFF, B: 0xFF, A: 0xFF})
 
 	a.badgeFill = canvas.NewRectangle(color.NRGBA{R: 0x4A, G: 0x4B, B: 0x50, A: 0xFF})
 	a.badgeFill.SetMinSize(fyne.NewSize(140, 36))
-	a.badgeLabel = widget.NewLabel("OFFLINE")
+	a.badgeLabel = canvas.NewText("OFFLINE", color.White)
 	a.badgeLabel.Alignment = fyne.TextAlignCenter
+	a.badgeLabel.TextStyle = fyne.TextStyle{Bold: true}
+	a.badgeLabel.TextSize = 13
 
 	a.titleLabel = widget.NewLabelWithStyle("Codex companion", fyne.TextAlignLeading, fyne.TextStyle{Bold: true})
 	a.titleLabel.Wrapping = fyne.TextWrapWord
 	a.summaryLabel = widget.NewLabel("Waiting for the codex-buddy service.")
 	a.summaryLabel.Wrapping = fyne.TextWrapWord
 
-	a.activeLabel = widget.NewLabel("-")
+	a.activeLabel = widget.NewLabelWithStyle("-", fyne.TextAlignLeading, fyne.TextStyle{Bold: true})
+	a.activeLabel.Wrapping = fyne.TextWrapWord
 	a.updatedLabel = widget.NewLabel("-")
 	a.connectionLabel = widget.NewLabel("Disconnected")
+	a.connectionLabel.Wrapping = fyne.TextWrapWord
 	a.statusLabel = widget.NewLabel("Connecting to codex-buddy")
 
-	stats := widget.NewCard("Current Session", "", container.NewVBox(
-		statRow("Active Session", a.activeLabel),
-		statRow("Updated", a.updatedLabel),
-		statRow("Connection", a.connectionLabel),
-		statRow("Status", a.statusLabel),
-	))
-
-	header := widget.NewCard("", "", container.NewBorder(
-		nil,
-		nil,
-		container.NewVBox(container.NewStack(a.badgeFill, container.NewCenter(a.badgeLabel))),
-		stats,
-		container.NewVBox(a.titleLabel, a.summaryLabel),
-	))
-
-	a.cardTitle = widget.NewLabelWithStyle("Primary Card", fyne.TextAlignLeading, fyne.TextStyle{Bold: true})
-	a.cardSession = widget.NewLabel("No pending notification")
-	a.cardMeta = widget.NewLabel("Handle complex cases in the terminal.")
-	a.cardSummary = widget.NewLabel("A compact result preview will appear here when Codex finishes a run.")
-	a.cardSummary.Wrapping = fyne.TextWrapWord
-	a.cardSummary.TextStyle = fyne.TextStyle{Bold: true}
-
-	a.ackButton = widget.NewButton("Acknowledge (A)", func() { go a.ackPrimary() })
-	a.continueButton = widget.NewButton("Continue", func() { a.confirmContinue() })
-	a.refreshButton = widget.NewButtonWithIcon("Refresh", theme.ViewRefreshIcon(), func() { go a.refreshNow(context.Background()) })
-
-	cardBody := container.NewVBox(
-		a.cardTitle,
-		a.cardSession,
-		widget.NewSeparator(),
-		a.cardSummary,
-		a.cardMeta,
-		container.NewHBox(a.ackButton, a.continueButton, layout.NewSpacer(), a.refreshButton),
+	a.themeButton = widget.NewButtonWithIcon("Dark (T)", theme.ColorPaletteIcon(), a.toggleTheme)
+	a.themeButton.Importance = widget.HighImportance
+	a.refreshButton = widget.NewButtonWithIcon("Refresh (R)", theme.ViewRefreshIcon(), func() { go a.refreshNow(context.Background()) })
+	a.refreshButton.Importance = widget.HighImportance
+	statusSummary := container.NewVBox(
+		a.titleLabel,
+		a.activeLabel,
+		a.summaryLabel,
 	)
-	card := widget.NewCard("Notification Card", "", cardBody)
+	stats := widget.NewCard("Current Session", "", container.NewVBox(
+		statusSummary,
+		widget.NewSeparator(),
+		container.NewGridWithColumns(2,
+			metaBlock("Updated", a.updatedLabel),
+			metaBlock("Connection", a.connectionLabel),
+		),
+		metaBlock("Status", a.statusLabel),
+	))
 
-	a.sessionList = widget.NewLabel("No active sessions")
-	a.sessionList.Wrapping = fyne.TextWrapWord
+	header := container.NewBorder(
+		nil,
+		nil,
+		container.NewCenter(container.NewStack(a.badgeFill, container.NewCenter(a.badgeLabel))),
+		container.NewHBox(a.themeButton, a.refreshButton),
+		nil,
+	)
+
+	a.sessionList = container.NewVBox(widget.NewLabel("No active sessions"))
 	sidebar := widget.NewCard("Session Overview", "", a.sessionList)
 
-	split := container.NewHSplit(card, sidebar)
-	split.SetOffset(0.68)
-
-	root := container.NewBorder(
+	content := container.NewVBox(
 		header,
-		nil,
-		nil,
-		nil,
-		split,
+		stats,
+		sidebar,
 	)
+	a.rootScroll = container.NewVScroll(content)
 
-	return container.NewMax(bg, container.NewPadded(root))
+	return container.NewMax(a.bgFill, container.NewPadded(a.rootScroll))
 }
 
-func statRow(title string, value fyne.CanvasObject) fyne.CanvasObject {
-	return container.NewBorder(nil, nil, widget.NewLabel(title), nil, value)
+func metaBlock(title string, value fyne.CanvasObject) fyne.CanvasObject {
+	return container.NewVBox(
+		widget.NewLabel(title),
+		value,
+	)
 }
 
 func (a *App) installKeyHandlers() {
@@ -198,23 +190,20 @@ func (a *App) installKeyHandlers() {
 		switch event.Name {
 		case fyne.KeyA:
 			go a.ackPrimary()
+		case fyne.KeyC:
+			a.confirmContinue()
+		case fyne.KeyEscape:
+			a.dismissNotification()
+		case fyne.KeyJ:
+			a.scrollBy(88)
+		case fyne.KeyK:
+			a.scrollBy(-88)
 		case fyne.KeyR:
 			go a.refreshNow(context.Background())
+		case fyne.KeyT:
+			a.toggleTheme()
 		}
 	})
-
-	if deskCanvas, ok := a.window.Canvas().(desktop.Canvas); ok {
-		deskCanvas.SetOnKeyDown(func(event *fyne.KeyEvent) {
-			if event.Name == fyne.KeyC {
-				a.beginHoldContinue()
-			}
-		})
-		deskCanvas.SetOnKeyUp(func(event *fyne.KeyEvent) {
-			if event.Name == fyne.KeyC {
-				a.cancelHoldContinue(false)
-			}
-		})
-	}
 }
 
 func (a *App) startSync(ctx context.Context) {
@@ -235,8 +224,8 @@ func (a *App) startSync(ctx context.Context) {
 		if ctx.Err() != nil {
 			return
 		}
-		if err != nil {
-			a.setStatusLine("Live stream disconnected, reconnecting: " + err.Error())
+		if err != nil && a.logger != nil {
+			a.logger.Printf("uconsole stream disconnected: %v", err)
 		}
 		select {
 		case <-ctx.Done():
@@ -263,12 +252,34 @@ func (a *App) pollLoop(ctx context.Context) {
 func (a *App) refreshNow(ctx context.Context) error {
 	status, err := a.client.LoadStatus(ctx)
 	if err != nil {
-		a.applyState(offlineStatus(), nil, false, err)
+		a.applyRefreshError(err)
 		return err
 	}
 	notifs, notifErr := a.client.LoadNotifications(ctx)
 	a.applyState(status, notifs, true, notifErr)
 	return notifErr
+}
+
+func (a *App) applyRefreshError(err error) {
+	if err == nil {
+		return
+	}
+
+	a.stateMu.RLock()
+	lastSuccess := a.lastSuccess
+	connected := a.connected
+	a.stateMu.RUnlock()
+
+	grace := time.Duration(a.cfg.PollFallbackMS+a.cfg.ReconnectDelayMS)*time.Millisecond + 2*time.Second
+	if connected && !lastSuccess.IsZero() && time.Since(lastSuccess) < grace {
+		a.stateMu.Lock()
+		a.lastError = err.Error()
+		a.stateMu.Unlock()
+		a.setStatusLine("Refresh failed: " + briefError(err.Error(), 42))
+		return
+	}
+
+	a.applyState(offlineStatus(), nil, false, err)
 }
 
 func (a *App) applyState(status StatusResponse, notifications []NotificationResponse, connected bool, err error) {
@@ -281,10 +292,8 @@ func (a *App) applyState(status StatusResponse, notifications []NotificationResp
 	}
 	if err != nil {
 		a.lastError = err.Error()
-		a.statusLine = err.Error()
 	} else {
 		a.lastError = ""
-		a.statusLine = "Connected"
 	}
 	primary := a.primaryNotificationLocked()
 	if a.lightRunner != nil {
@@ -297,7 +306,10 @@ func (a *App) applyState(status StatusResponse, notifications []NotificationResp
 	}
 	a.stateMu.Unlock()
 
-	fyne.Do(a.render)
+	fyne.Do(func() {
+		a.render()
+		a.syncNotificationDialog()
+	})
 }
 
 func (a *App) primaryNotificationLocked() *NotificationResponse {
@@ -312,15 +324,19 @@ func (a *App) render() {
 	a.stateMu.RLock()
 	defer a.stateMu.RUnlock()
 
-	primary := a.primaryNotificationLocked()
 	badgeText, badgeColor := badgeStyle(a.lastStatus.OverallState)
-	a.badgeLabel.SetText(strings.ToUpper(badgeText))
+	a.badgeLabel.Text = strings.ToUpper(badgeText)
+	a.badgeLabel.Color = color.White
+	a.badgeLabel.Refresh()
 	a.badgeFill.FillColor = badgeColor
 	a.badgeFill.Refresh()
+	a.bgFill.FillColor = appBackground(a.darkMode)
+	a.bgFill.Refresh()
 
 	a.titleLabel.SetText(titleForState(a.lastStatus.OverallState))
 	a.summaryLabel.SetText(summaryForState(a.lastStatus.OverallState, a.connected, a.lastError))
 	a.activeLabel.SetText(activeSessionLabel(a.lastStatus))
+	a.themeButton.SetText(themeToggleLabel(a.darkMode))
 	if a.lastStatus.ServerTime.IsZero() {
 		a.updatedLabel.SetText("-")
 	} else {
@@ -331,28 +347,9 @@ func (a *App) render() {
 	} else {
 		a.connectionLabel.SetText("Disconnected")
 	}
-	a.statusLabel.SetText(valueOrDash(a.statusLine))
+	a.statusLabel.SetText(statusText(a.connected, a.lastError, a.statusLine, a.statusUntil))
 
-	a.cardTitle.SetText(cardTitle(primary))
-	if primary == nil {
-		a.cardSession.SetText("No pending notification")
-		a.cardSummary.SetText("A compact result preview will appear here when Codex finishes a run.")
-		a.cardMeta.SetText("Press A to acknowledge, or hold C for 800ms to send continue.")
-		a.ackButton.Disable()
-		a.continueButton.Disable()
-	} else {
-		a.cardSession.SetText("Session: " + sessionLabelByID(a.lastStatus.Sessions, primary.SessionID))
-		a.cardSummary.SetText(valueOrDash(primary.Summary))
-		a.cardMeta.SetText(primaryMeta(*primary))
-		a.ackButton.Enable()
-		if canContinue(*primary) {
-			a.continueButton.Enable()
-		} else {
-			a.continueButton.Disable()
-		}
-	}
-
-	a.sessionList.SetText(sessionListText(a.lastStatus.Sessions))
+	a.renderSessionList(a.lastStatus.Sessions)
 }
 
 func (a *App) ackPrimary() {
@@ -394,51 +391,131 @@ func (a *App) executeContinue(item NotificationResponse) {
 	_ = a.refreshNow(context.Background())
 }
 
-func (a *App) beginHoldContinue() {
-	a.stateMu.RLock()
-	primary := a.primaryNotificationLocked()
-	a.stateMu.RUnlock()
-	if primary == nil || !canContinue(*primary) {
-		return
-	}
-
-	a.holdMu.Lock()
-	defer a.holdMu.Unlock()
-	if a.holdTimer != nil {
-		return
-	}
-	a.holdActive = true
-	a.setStatusLine("Waiting for continue hold confirmation...")
-	item := *primary
-	a.holdTimer = time.AfterFunc(time.Duration(a.cfg.ContinueHoldMS)*time.Millisecond, func() {
-		a.holdMu.Lock()
-		a.holdActive = false
-		a.holdTimer = nil
-		a.holdMu.Unlock()
-		a.executeContinue(item)
-	})
-}
-
-func (a *App) cancelHoldContinue(triggered bool) {
-	a.holdMu.Lock()
-	timer := a.holdTimer
-	a.holdTimer = nil
-	wasActive := a.holdActive
-	a.holdActive = false
-	a.holdMu.Unlock()
-	if timer == nil {
-		return
-	}
-	if timer.Stop() && wasActive && !triggered {
-		a.setStatusLine("Continue cancelled")
-	}
-}
-
 func (a *App) setStatusLine(message string) {
 	a.stateMu.Lock()
 	a.statusLine = message
+	a.statusUntil = time.Now().Add(4 * time.Second)
 	a.stateMu.Unlock()
 	fyne.Do(a.render)
+
+	time.AfterFunc(4*time.Second, func() {
+		a.stateMu.Lock()
+		if !a.statusUntil.IsZero() && time.Now().After(a.statusUntil) {
+			a.statusLine = ""
+		}
+		a.stateMu.Unlock()
+		fyne.Do(a.render)
+	})
+}
+
+func (a *App) syncNotificationDialog() {
+	a.stateMu.RLock()
+	primary := a.primaryNotificationLocked()
+	status := a.lastStatus
+	currentDialog := a.notifDialog
+	currentDialogID := a.dialogNotifID
+	shownID := a.shownNotifID
+	a.stateMu.RUnlock()
+
+	if primary == nil || !shouldPopupNotification(*primary) {
+		if currentDialog != nil {
+			currentDialog.Hide()
+		}
+		return
+	}
+	if currentDialog != nil && currentDialogID == primary.ID {
+		return
+	}
+	if shownID == primary.ID {
+		return
+	}
+	if currentDialog != nil {
+		currentDialog.Hide()
+	}
+
+	item := *primary
+	sessionLabel := sessionLabelByID(status.Sessions, item.SessionID)
+	dlg := a.buildNotificationDialog(item, sessionLabel)
+
+	a.stateMu.Lock()
+	a.notifDialog = dlg
+	a.dialogNotifID = item.ID
+	a.shownNotifID = item.ID
+	a.stateMu.Unlock()
+
+	dlg.Show()
+}
+
+func (a *App) buildNotificationDialog(item NotificationResponse, sessionLabel string) dialog.Dialog {
+	title := widget.NewLabelWithStyle(cardTitle(&item), fyne.TextAlignLeading, fyne.TextStyle{Bold: true})
+	session := widget.NewLabel("Session: " + valueOrDash(sessionLabel))
+	session.Wrapping = fyne.TextWrapWord
+	summary := widget.NewLabel(valueOrDash(item.Summary))
+	summary.Wrapping = fyne.TextWrapWord
+	summary.TextStyle = fyne.TextStyle{Bold: true}
+	meta := widget.NewLabel(primaryMeta(item))
+	meta.Wrapping = fyne.TextWrapWord
+
+	var dlg dialog.Dialog
+	ackBtn := widget.NewButton("Acknowledge (A)", func() {
+		if dlg != nil {
+			dlg.Hide()
+		}
+		go a.ackNotification(item.ID)
+	})
+	ackBtn.Importance = widget.HighImportance
+	continueBtn := widget.NewButton("Continue (C)", func() {
+		if dlg != nil {
+			dlg.Hide()
+		}
+		a.confirmContinueItem(item)
+	})
+	continueBtn.Importance = widget.HighImportance
+	if !canContinue(item) {
+		continueBtn.Disable()
+	}
+
+	content := container.NewVBox(
+		title,
+		session,
+		widget.NewSeparator(),
+		summary,
+		meta,
+		container.NewGridWithColumns(2, ackBtn, continueBtn),
+	)
+
+	dlg = dialog.NewCustom(cardTitle(&item), "Dismiss (Esc)", content, a.window)
+	dlg.SetOnClosed(func() {
+		a.stateMu.Lock()
+		defer a.stateMu.Unlock()
+		if a.notifDialog == dlg {
+			a.notifDialog = nil
+			a.dialogNotifID = ""
+		}
+	})
+	return dlg
+}
+
+func (a *App) ackNotification(id string) {
+	if strings.TrimSpace(id) == "" {
+		return
+	}
+	if err := a.client.AckNotification(context.Background(), id); err != nil {
+		a.setStatusLine(err.Error())
+		return
+	}
+	_ = a.refreshNow(context.Background())
+}
+
+func (a *App) confirmContinueItem(item NotificationResponse) {
+	if !canContinue(item) {
+		return
+	}
+	dialog.NewConfirm("Send Continue", "Send one \"continue + Enter\" action to the current Codex session?", func(ok bool) {
+		if ok {
+			go a.executeContinue(item)
+		}
+	}, a.window).Show()
 }
 
 func offlineStatus() StatusResponse {
@@ -486,11 +563,11 @@ func summaryForState(state model.State, connected bool, lastError string) string
 	}
 	switch state {
 	case model.StateAttention:
-		return "A run just finished. The primary card will show a compact preview."
+		return "A run just finished. A notification dialog should appear."
 	case model.StateError:
-		return "Handle complex or broken states in the terminal first."
+		return "An error notification will pop up when intervention is needed."
 	case model.StateRunning, model.StateRunningBash:
-		return "uConsole is a sidecar for alerts, continue, and LED feedback."
+		return "Remote session is active. Alerts and quick actions stay available here."
 	case model.StateIdle:
 		return "There is no active task right now."
 	default:
@@ -517,25 +594,69 @@ func primaryMeta(primary NotificationResponse) string {
 	if primary.State == model.NotificationAcked {
 		return "This notification is acknowledged, but continue is still available."
 	}
-	return "Press A to acknowledge, or hold C for 800ms to send continue."
+	return "Press A to acknowledge, C to continue, or Esc to dismiss."
 }
 
-func sessionListText(sessions []SessionResponse) string {
+func (a *App) renderSessionList(sessions []SessionResponse) {
+	a.sessionList.Objects = sessionListObjects(sessions)
+	a.sessionList.Refresh()
+}
+
+func sessionListObjects(sessions []SessionResponse) []fyne.CanvasObject {
 	if len(sessions) == 0 {
-		return "No active sessions"
+		label := widget.NewLabel("No active sessions")
+		return []fyne.CanvasObject{label}
 	}
-	var lines []string
-	for _, session := range sessions {
-		line := fmt.Sprintf("• %s  [%s]", sessionListTitle(session), session.State)
-		if session.ShortSessionID != "" && session.ShortSessionID != sessionListTitle(session) {
-			line += "  #" + session.ShortSessionID
+	objects := make([]fyne.CanvasObject, 0, len(sessions)*2)
+	for i, session := range sessions {
+		objects = append(objects, sessionRow(session))
+		if i < len(sessions)-1 {
+			objects = append(objects, widget.NewSeparator())
 		}
-		if summary := firstNonEmptyText(session.AttentionSummary, session.Summary); summary != "" {
-			line += "\n  " + summary
-		}
-		lines = append(lines, line)
 	}
-	return strings.Join(lines, "\n")
+	return objects
+}
+
+func sessionRow(session SessionResponse) fyne.CanvasObject {
+	title := widget.NewLabelWithStyle(sessionListTitle(session), fyne.TextAlignLeading, fyne.TextStyle{Bold: true})
+	title.Wrapping = fyne.TextWrapWord
+
+	idText := session.ShortSessionID
+	if strings.TrimSpace(idText) == "" {
+		idText = shortSessionID(session.SessionID)
+	}
+	meta := widget.NewLabel(idText)
+
+	top := container.NewBorder(
+		nil,
+		nil,
+		container.NewVBox(title, meta),
+		stateBadge(session.State),
+		nil,
+	)
+
+	objects := []fyne.CanvasObject{top}
+	if summary := firstNonEmptyText(session.AttentionSummary, session.Summary); summary != "" {
+		summaryLabel := widget.NewLabel(summary)
+		summaryLabel.Wrapping = fyne.TextWrapWord
+		objects = append(objects, summaryLabel)
+	}
+
+	updated := widget.NewLabel("Updated " + relativeTime(session.UpdatedAt))
+	objects = append(objects, updated)
+
+	return container.NewVBox(objects...)
+}
+
+func stateBadge(state model.State) fyne.CanvasObject {
+	label, fill := badgeStyle(state)
+	bg := canvas.NewRectangle(fill)
+	bg.SetMinSize(fyne.NewSize(92, 28))
+	text := canvas.NewText(strings.ToUpper(label), color.White)
+	text.Alignment = fyne.TextAlignCenter
+	text.TextStyle = fyne.TextStyle{Bold: true}
+	text.TextSize = 11
+	return container.NewStack(bg, container.NewCenter(text))
 }
 
 func activeSessionLabel(status StatusResponse) string {
@@ -591,6 +712,31 @@ func firstNonEmptyText(values ...string) string {
 	return ""
 }
 
+func shortSessionID(value string) string {
+	value = strings.TrimSpace(value)
+	if len(value) <= 8 {
+		return valueOrDash(value)
+	}
+	return value[:8]
+}
+
+func relativeTime(when time.Time) string {
+	if when.IsZero() {
+		return "-"
+	}
+	delta := time.Since(when)
+	if delta < time.Minute {
+		return "just now"
+	}
+	if delta < time.Hour {
+		return fmt.Sprintf("%dm ago", int(delta/time.Minute))
+	}
+	if delta < 24*time.Hour {
+		return fmt.Sprintf("%dh ago", int(delta/time.Hour))
+	}
+	return when.Local().Format("01-02 15:04")
+}
+
 func canContinue(item NotificationResponse) bool {
 	for _, action := range item.Actions {
 		if action == model.NotificationActionContinue {
@@ -600,9 +746,105 @@ func canContinue(item NotificationResponse) bool {
 	return false
 }
 
+func shouldPopupNotification(item NotificationResponse) bool {
+	return item.State == model.NotificationPending
+}
+
+func statusText(connected bool, lastError, transient string, until time.Time) string {
+	if strings.TrimSpace(transient) != "" && time.Now().Before(until) {
+		return briefError(transient, 56)
+	}
+	if connected {
+		return "Live updates"
+	}
+	if strings.TrimSpace(lastError) == "" {
+		return "Disconnected"
+	}
+	return "Disconnected: " + briefError(lastError, 40)
+}
+
+func briefError(message string, limit int) string {
+	message = strings.Join(strings.Fields(strings.TrimSpace(message)), " ")
+	if limit <= 0 || len(message) <= limit {
+		return message
+	}
+	if limit <= 3 {
+		return message[:limit]
+	}
+	return message[:limit-3] + "..."
+}
+
 func valueOrDash(value string) string {
 	if strings.TrimSpace(value) == "" {
 		return "-"
 	}
 	return value
+}
+
+func (a *App) toggleTheme() {
+	a.darkMode = !a.darkMode
+	a.applyTheme()
+	fyne.Do(a.render)
+}
+
+func (a *App) applyTheme() {
+	if a.fyneApp == nil {
+		return
+	}
+	if a.darkMode {
+		a.fyneApp.Settings().SetTheme(theme.DarkTheme())
+		return
+	}
+	a.fyneApp.Settings().SetTheme(theme.LightTheme())
+}
+
+func (a *App) dismissNotification() {
+	a.stateMu.RLock()
+	currentDialog := a.notifDialog
+	a.stateMu.RUnlock()
+	if currentDialog != nil {
+		currentDialog.Hide()
+	}
+}
+
+func (a *App) scrollBy(delta float32) {
+	if a.rootScroll == nil {
+		return
+	}
+	next := a.rootScroll.Offset.Y + delta
+	if next < 0 {
+		next = 0
+	}
+	a.rootScroll.Offset.Y = next
+	a.rootScroll.Refresh()
+}
+
+func normalizedWindowSize(width, height int) (int, int) {
+	if width <= 0 {
+		width = 640
+	}
+	if height <= 0 {
+		height = 680
+	}
+	if width > 640 {
+		width = 640
+	}
+	if height > 680 {
+		height = 680
+	}
+	return width, height
+}
+
+func themeToggleLabel(darkMode bool) string {
+	if darkMode {
+		return "Light (T)"
+	}
+	return "Dark (T)"
+}
+
+func appBackground(darkMode bool) color.NRGBA {
+	if darkMode {
+		return color.NRGBA{R: 0x00, G: 0x00, B: 0x00, A: 0xFF}
+	}
+	return color.NRGBA{R: 0xFF, G: 0xFF, B: 0xFF, A: 0xFF}
 }
