@@ -8,27 +8,34 @@ struct WatchContentView: View {
     var body: some View {
         List {
             Section {
-                HStack(spacing: 10) {
-                    Text(model.snapshot.overallState.face)
-                        .font(.title)
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(model.snapshot.overallState.displayName)
-                            .font(.headline)
-                        Text(model.snapshot.watchActiveSessionTitle ?? "No active session")
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack(alignment: .top, spacing: 10) {
+                        VStack(alignment: .leading, spacing: 3) {
+                            statusBadge(model.snapshot.overallState)
+                            Text(model.snapshot.watchActiveSessionTitle ?? "No active session")
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                        }
+                        Spacer(minLength: 0)
+                        Button {
+                            Task { await model.refresh() }
+                        } label: {
+                            if model.isRefreshing {
+                                ProgressView()
+                            } else {
+                                Image(systemName: "arrow.clockwise")
+                            }
+                        }
+                        .buttonStyle(.bordered)
+                        .controlSize(.small)
+                    }
+                    HStack(spacing: 4) {
+                        Text("Updated")
                             .font(.caption2)
                             .foregroundStyle(.secondary)
-                    }
-                }
-                Text("Updated \(CodexFormatters.shortTime(model.snapshot.serverTime))")
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-                Button {
-                    Task { await model.refresh() }
-                } label: {
-                    if model.isRefreshing {
-                        ProgressView()
-                    } else {
-                        Text("Refresh")
+                        Text(CodexFormatters.shortTime(model.snapshot.serverTime))
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
                     }
                 }
             }
@@ -41,14 +48,10 @@ struct WatchContentView: View {
                     ForEach(model.snapshot.sessions) { session in
                         VStack(alignment: .leading, spacing: 6) {
                             HStack(alignment: .top) {
-                                Text(session.state.face)
-                                VStack(alignment: .leading, spacing: 2) {
-                                    Text(session.watchListTitle)
-                                        .font(.headline)
-                                    Text(session.shortSessionID ?? CodexFormatters.shortSessionLabel(session.sessionID))
-                                        .font(.caption2)
-                                        .foregroundStyle(.secondary)
-                                }
+                                Text(session.watchListTitle)
+                                    .font(.headline)
+                                Spacer()
+                                statusBadge(session.state)
                             }
                             if !session.watchAssistantSummary.isEmpty {
                                 Text(session.watchAssistantSummary)
@@ -92,6 +95,38 @@ struct WatchContentView: View {
             Button("OK", role: .cancel) {}
         } message: {
             Text(presentedErrorMessage ?? "Unknown error")
+        }
+    }
+
+    private func statusBadge(_ state: CodexState) -> some View {
+        let tint = watchBadgeColor(state)
+
+        return Text(state.displayName)
+            .font(.caption2.weight(.bold))
+            .padding(.horizontal, 8)
+            .padding(.vertical, 4)
+            .foregroundStyle(.white)
+            .background(tint, in: Capsule())
+            .overlay {
+                Capsule()
+                    .strokeBorder(tint.opacity(0.55), lineWidth: 1)
+            }
+    }
+
+    private func watchBadgeColor(_ state: CodexState) -> Color {
+        switch state.normalized {
+        case .offline:
+            return .gray
+        case .idle:
+            return .green
+        case .running:
+            return .blue
+        case .attention:
+            return .orange
+        case .error:
+            return .red
+        case .runningBash:
+            return .blue
         }
     }
 }

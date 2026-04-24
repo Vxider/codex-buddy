@@ -145,12 +145,11 @@ struct PhoneContentView: View {
         .padding(.horizontal, 10)
         .padding(.vertical, 6)
         .foregroundStyle(.white)
-        .background(tint.gradient, in: Capsule())
+        .background(tint, in: Capsule())
         .overlay {
             Capsule()
                 .strokeBorder(tint.opacity(0.55), lineWidth: 1)
         }
-        .shadow(color: tint.opacity(0.28), radius: 8, y: 2)
     }
 }
 
