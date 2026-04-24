@@ -19,6 +19,7 @@ import (
 type Client struct {
 	baseURL string
 	http    *http.Client
+	stream  *http.Client
 	logger  *log.Logger
 }
 
@@ -29,6 +30,7 @@ func NewClient(baseURL string, timeout time.Duration, logger *log.Logger) *Clien
 	return &Client{
 		baseURL: strings.TrimRight(baseURL, "/"),
 		http:    &http.Client{Timeout: timeout},
+		stream:  &http.Client{},
 		logger:  logger,
 	}
 }
@@ -121,7 +123,7 @@ func (c *Client) StreamStatus(ctx context.Context, onStatus func(StatusResponse)
 	if err != nil {
 		return err
 	}
-	resp, err := c.http.Do(req)
+	resp, err := c.stream.Do(req)
 	if err != nil {
 		return err
 	}
