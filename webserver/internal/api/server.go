@@ -23,6 +23,7 @@ type Server struct {
 	store      *store.Store
 	transcript *transcript.Manager
 	control    control.ContinueExecutor
+	openCheck  control.SessionOpenChecker
 	logger     *log.Logger
 }
 
@@ -84,12 +85,13 @@ type sessionTitleSet struct {
 	Micro   string
 }
 
-func NewServer(cfg config.Config, sessionStore *store.Store, transcriptManager *transcript.Manager, executor control.ContinueExecutor, logger *log.Logger) *Server {
+func NewServer(cfg config.Config, sessionStore *store.Store, transcriptManager *transcript.Manager, executor control.ContinueExecutor, openCheck control.SessionOpenChecker, logger *log.Logger) *Server {
 	return &Server{
 		cfg:        cfg,
 		store:      sessionStore,
 		transcript: transcriptManager,
 		control:    executor,
+		openCheck:  openCheck,
 		logger:     logger,
 	}
 }
@@ -144,7 +146,7 @@ func (s *Server) handleNotifications(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, map[string]any{
-		"notifications": s.publicNotifications(s.store.Notifications()),
+		"notifications": s.publicNotifications(s.visibleNotifications()),
 	})
 }
 
@@ -188,7 +190,7 @@ func (s *Server) handleNotificationAction(w http.ResponseWriter, r *http.Request
 			return
 		}
 		notification, session, ok := s.store.ContinueTarget(id, req.ActionToken)
-		if !ok {
+		if !ok || !s.isSessionVisible(session) {
 			http.Error(w, "notification is no longer actionable", http.StatusConflict)
 			return
 		}
@@ -211,7 +213,7 @@ func (s *Server) handleNotificationAction(w http.ResponseWriter, r *http.Request
 }
 
 func (s *Server) handleSessions(w http.ResponseWriter, _ *http.Request) {
-	sessions := s.store.Sessions()
+	sessions := s.visibleSessions(s.store.Sessions())
 	writeJSON(w, http.StatusOK, map[string]any{
 		"sessions": s.publicSessions(sessions, s.notificationIndex(), sessionTitles(sessions)),
 	})
@@ -234,7 +236,7 @@ func (s *Server) handleSession(w http.ResponseWriter, r *http.Request) {
 		}
 
 		session, ok := s.store.Session(sessionID)
-		if !ok {
+		if !ok || !s.isSessionVisible(session) {
 			http.NotFound(w, r)
 			return
 		}
@@ -319,6 +321,18 @@ func (s *Server) handleCodexControlDisabled(w http.ResponseWriter, r *http.Reque
 }
 
 func (s *Server) decorateSnapshot(snapshot model.StatusSnapshot) model.StatusSnapshot {
+	snapshot.Sessions = s.visibleSessions(snapshot.Sessions)
+	snapshot.SessionsCount = len(snapshot.Sessions)
+	if len(snapshot.Sessions) == 0 {
+		snapshot.ActiveSessionID = ""
+		snapshot.OverallState = model.StateOffline
+		snapshot.OverallStateDetail = ""
+	} else {
+		active := snapshot.Sessions[0]
+		snapshot.ActiveSessionID = active.SessionID
+		snapshot.OverallState = active.State
+		snapshot.OverallStateDetail = active.StateDetail
+	}
 	if s.transcript != nil {
 		snapshot.TranscriptWatchers = s.transcript.Snapshot()
 	}
@@ -466,7 +480,7 @@ func (s *Server) handleSessionContinue(w http.ResponseWriter, r *http.Request, s
 }
 
 func (s *Server) notificationIndex() map[string]model.NotificationSnapshot {
-	items := s.store.Notifications()
+	items := s.visibleNotifications()
 	out := make(map[string]model.NotificationSnapshot, len(items))
 	for _, item := range items {
 		out[item.SessionID] = item
@@ -475,16 +489,63 @@ func (s *Server) notificationIndex() map[string]model.NotificationSnapshot {
 }
 
 func (s *Server) continueTargetForSession(sessionID, token string) (model.NotificationSnapshot, model.SessionSnapshot, bool) {
-	for _, notification := range s.store.Notifications() {
+	for _, notification := range s.visibleNotifications() {
 		if notification.SessionID != sessionID {
 			continue
 		}
 		if notification.ActionToken != token {
 			continue
 		}
-		return s.store.ContinueTarget(notification.ID, token)
+		targetNotification, session, ok := s.store.ContinueTarget(notification.ID, token)
+		if !ok || !s.isSessionVisible(session) {
+			return model.NotificationSnapshot{}, model.SessionSnapshot{}, false
+		}
+		return targetNotification, session, true
 	}
-	return s.store.ContinueTargetForSession(sessionID)
+	notification, session, ok := s.store.ContinueTargetForSession(sessionID)
+	if !ok || !s.isSessionVisible(session) {
+		return model.NotificationSnapshot{}, model.SessionSnapshot{}, false
+	}
+	return notification, session, true
+}
+
+func (s *Server) visibleSessions(sessions []model.SessionSnapshot) []model.SessionSnapshot {
+	if len(sessions) == 0 {
+		return sessions
+	}
+
+	items := make([]model.SessionSnapshot, 0, len(sessions))
+	for _, session := range sessions {
+		if !s.isSessionVisible(session) {
+			continue
+		}
+		items = append(items, session)
+	}
+	return items
+}
+
+func (s *Server) visibleNotifications() []model.NotificationSnapshot {
+	items := s.store.Notifications()
+	if len(items) == 0 {
+		return items
+	}
+
+	visible := make([]model.NotificationSnapshot, 0, len(items))
+	for _, item := range items {
+		session, ok := s.store.Session(item.SessionID)
+		if !ok || !s.isSessionVisible(session) {
+			continue
+		}
+		visible = append(visible, item)
+	}
+	return visible
+}
+
+func (s *Server) isSessionVisible(session model.SessionSnapshot) bool {
+	if s.openCheck == nil {
+		return true
+	}
+	return s.openCheck.IsOpen(session)
 }
 
 func shortSessionID(value string) string {

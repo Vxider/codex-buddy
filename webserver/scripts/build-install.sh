@@ -95,7 +95,9 @@ fi
 
 mkdir -p "$(dirname -- "${INSTALL_PATH}")"
 TMP_BIN="$(mktemp "${TMPDIR:-/tmp}/codex-buddy.webserver.XXXXXX")"
-trap 'rm -f -- "${TMP_BIN}"' EXIT
+INSTALL_DIR="$(dirname -- "${INSTALL_PATH}")"
+TMP_INSTALL="$(mktemp "${INSTALL_DIR}/.codex-buddy.install.XXXXXX")"
+trap 'rm -f -- "${TMP_BIN}" "${TMP_INSTALL}"' EXIT
 
 echo "==> building"
 (
@@ -104,8 +106,9 @@ echo "==> building"
 )
 
 echo "==> installing"
-cp "${TMP_BIN}" "${INSTALL_PATH}"
-chmod +x "${INSTALL_PATH}"
+cp "${TMP_BIN}" "${TMP_INSTALL}"
+chmod +x "${TMP_INSTALL}"
+mv -f "${TMP_INSTALL}" "${INSTALL_PATH}"
 
 if [[ "${SHOULD_RESTART}" -eq 1 ]]; then
   echo "==> restarting service"

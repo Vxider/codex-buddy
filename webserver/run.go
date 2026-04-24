@@ -11,6 +11,7 @@ import (
 	"github.com/vxider/codex-buddy/internal/config"
 	"github.com/vxider/codex-buddy/internal/model"
 	"github.com/vxider/codex-buddy/webserver/internal/api"
+	"github.com/vxider/codex-buddy/webserver/internal/bootstrap"
 	"github.com/vxider/codex-buddy/webserver/internal/control"
 	"github.com/vxider/codex-buddy/webserver/internal/store"
 	"github.com/vxider/codex-buddy/webserver/internal/transcript"
@@ -38,7 +39,15 @@ func Run(ctx context.Context, cfg config.Config, logger *log.Logger) error {
 			sessionStore.ApplyTranscriptUpdate(update)
 		},
 	)
-	server := api.NewServer(cfg, sessionStore, transcriptManager, control.NewTmuxContinueExecutor(logger), logger)
+	bootstrapOpenSessions(sessionStore, transcriptManager, logger)
+	server := api.NewServer(
+		cfg,
+		sessionStore,
+		transcriptManager,
+		control.NewTmuxContinueExecutor(logger),
+		control.NewTmuxSessionOpenChecker(logger),
+		logger,
+	)
 
 	httpServer := &http.Server{
 		Addr:              cfg.Listen.Address(),
@@ -86,5 +95,55 @@ func Run(ctx context.Context, cfg config.Config, logger *log.Logger) error {
 	case <-time.After(1 * time.Second):
 		logger.Printf("server exit confirmation timed out; assuming closed")
 		return nil
+	}
+}
+
+func bootstrapOpenSessions(sessionStore *store.Store, transcriptManager *transcript.Manager, logger *log.Logger) {
+	sessions, err := bootstrap.RecoverOpenSessions(logger)
+	if err != nil {
+		if logger != nil {
+			logger.Printf("bootstrap session recovery failed: %v", err)
+		}
+		return
+	}
+
+	now := time.Now().UTC()
+	for _, session := range sessions {
+		sessionStore.ApplyIngest(model.IngestRequest{
+			Source:        "bootstrap",
+			EventName:     "session-start",
+			HookEventName: "session-start",
+			ReceivedAt:    now,
+			Payload: model.HookPayload{
+				SessionID:      session.SessionID,
+				CWD:            session.CWD,
+				TmuxPane:       session.TmuxPane,
+				TmuxSession:    session.TmuxSession,
+				TmuxWindow:     session.TmuxWindow,
+				TranscriptPath: session.TranscriptPath,
+			},
+		})
+
+		if session.TranscriptPath == "" {
+			if logger != nil {
+				logger.Printf("bootstrap recovered session=%s pane=%s without transcript path", session.SessionID, session.TmuxPane)
+			}
+			continue
+		}
+
+		update, err := transcript.RecoverSession(session.TranscriptPath, session.SessionID)
+		if err != nil {
+			if logger != nil {
+				logger.Printf("bootstrap transcript recovery failed session=%s path=%s err=%v", session.SessionID, session.TranscriptPath, err)
+			}
+		} else if update.SessionID != "" && !update.UpdatedAt.IsZero() {
+			sessionStore.ApplyTranscriptUpdate(update)
+		}
+
+		transcriptManager.Ensure(session.SessionID, session.TranscriptPath)
+	}
+
+	if logger != nil && len(sessions) > 0 {
+		logger.Printf("bootstrap recovered %d open codex sessions", len(sessions))
 	}
 }
