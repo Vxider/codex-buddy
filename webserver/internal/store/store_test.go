@@ -185,6 +185,36 @@ func TestRunningCanStillFallBackWhenConfigured(t *testing.T) {
 	}
 }
 
+func TestTranscriptErrorDoesNotPromoteRunningSessionToError(t *testing.T) {
+	st := New(0, 0, log.New(io.Discard, "", 0))
+	now := time.Now().UTC()
+
+	st.ApplyIngest(model.IngestRequest{
+		EventName:  "user-prompt-submit",
+		ReceivedAt: now,
+		Payload: model.HookPayload{
+			SessionID: "sess-running",
+		},
+	})
+
+	st.ApplyTranscriptUpdate(model.TranscriptUpdate{
+		SessionID: "sess-running",
+		Error:     "tool failed internally",
+		UpdatedAt: now.Add(time.Second),
+	})
+
+	session, ok := st.Session("sess-running")
+	if !ok {
+		t.Fatalf("expected session")
+	}
+	if session.State != model.StateRunning {
+		t.Fatalf("expected running session to stay running after transcript error, got %s", session.State)
+	}
+	if session.LastError != "tool failed internally" {
+		t.Fatalf("expected last error metadata to be retained, got %q", session.LastError)
+	}
+}
+
 func TestPreviewKeepsUTF8ValidForMultibyteText(t *testing.T) {
 	input := strings.Repeat("emoji🙂test", 100)
 	output := preview(input)
@@ -212,12 +242,12 @@ func TestPreviewAssistantPrefersTailContext(t *testing.T) {
 	}
 }
 
-func TestErrorNotificationUsesReadableCommandFailure(t *testing.T) {
+func TestTranscriptErrorDoesNotCreateNotificationWhileRunning(t *testing.T) {
 	st := New(30*time.Second, 0, log.New(io.Discard, "", 0))
 	now := time.Now().UTC()
 
 	st.ApplyIngest(model.IngestRequest{
-		EventName:  "session-start",
+		EventName:  "user-prompt-submit",
 		ReceivedAt: now,
 		Payload: model.HookPayload{
 			SessionID: "sess-error",
@@ -232,8 +262,42 @@ func TestErrorNotificationUsesReadableCommandFailure(t *testing.T) {
 	})
 
 	items := st.Notifications()
+	if len(items) != 0 {
+		t.Fatalf("expected no notification for running transcript error, got %d", len(items))
+	}
+}
+
+func TestStopErrorCreatesReadableNotification(t *testing.T) {
+	st := New(30*time.Second, 0, log.New(io.Discard, "", 0))
+	now := time.Now().UTC()
+
+	st.ApplyIngest(model.IngestRequest{
+		EventName:  "user-prompt-submit",
+		ReceivedAt: now,
+		Payload: model.HookPayload{
+			SessionID: "sess-error",
+			TmuxPane:  "%1",
+		},
+	})
+	st.ApplyTranscriptUpdate(model.TranscriptUpdate{
+		SessionID:       "sess-error",
+		LastBashCommand: "npm test",
+		Error:           "FAIL\tapi",
+		UpdatedAt:       now.Add(time.Second),
+	})
+	st.ApplyIngest(model.IngestRequest{
+		EventName:  "stop",
+		ReceivedAt: now.Add(2 * time.Second),
+		Payload: model.HookPayload{
+			SessionID: "sess-error",
+			TmuxPane:  "%1",
+			Error:     "FAIL\tapi",
+		},
+	})
+
+	items := st.Notifications()
 	if len(items) != 1 {
-		t.Fatalf("expected one notification, got %d", len(items))
+		t.Fatalf("expected one notification after stop error, got %d", len(items))
 	}
 	if items[0].Title != "Command failed" {
 		t.Fatalf("unexpected notification title: %q", items[0].Title)

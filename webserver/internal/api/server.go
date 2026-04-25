@@ -613,7 +613,7 @@ func sessionSummary(session model.SessionSnapshot) string {
 	if session.State == model.StateError {
 		return present.ErrorSummary(session)
 	}
-	return firstNonEmpty(session.LastError, session.LastAssistantMessage, session.LastBashCommand, session.LastUserPromptPreview)
+	return firstNonEmpty(session.LastAssistantMessage, session.LastBashCommand, session.LastUserPromptPreview)
 }
 
 func firstNonEmpty(values ...string) string {

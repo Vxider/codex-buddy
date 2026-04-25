@@ -174,11 +174,8 @@ func (s *Store) ApplyTranscriptUpdate(update model.TranscriptUpdate) model.Statu
 	if update.LastBashCommand != "" {
 		session.LastBashCommand = preview(update.LastBashCommand)
 	}
-	if update.Error != "" && session.State != model.StateError {
-		session.State = model.StateError
-		session.StateDetail = string(model.StateError)
+	if update.Error != "" {
 		session.LastError = preview(update.Error)
-		session.CurrentAttentionDeadline = s.attentionDeadline()
 	}
 
 	s.appendRecentEventLocked(model.RecentEvent{

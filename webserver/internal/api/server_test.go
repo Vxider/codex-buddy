@@ -388,6 +388,51 @@ func TestStatusIncludesCompactMobileFields(t *testing.T) {
 	}
 }
 
+func TestStatusRunningSummaryDoesNotExposeTranscriptError(t *testing.T) {
+	st := store.New(30*time.Second, 0, log.New(io.Discard, "", 0))
+	now := time.Date(2026, 4, 25, 2, 0, 0, 0, time.UTC)
+
+	st.ApplyIngest(model.IngestRequest{
+		EventName:  "user-prompt-submit",
+		ReceivedAt: now,
+		Payload: model.HookPayload{
+			SessionID: "sess-running",
+			CWD:       "/repo/payments",
+			Prompt:    "refactor payments flow",
+			TmuxPane:  "%51",
+		},
+	})
+	st.ApplyTranscriptUpdate(model.TranscriptUpdate{
+		SessionID:            "sess-running",
+		Error:                "internal tool step failed",
+		LastAssistantMessage: "still working through the refactor",
+		UpdatedAt:            now.Add(time.Second),
+	})
+
+	server := NewServer(config.Config{}, st, nil, &stubContinueExecutor{}, nil, log.New(io.Discard, "", 0))
+	req := httptest.NewRequest(http.MethodGet, "/v1/status", nil)
+	resp := httptest.NewRecorder()
+	server.Handler().ServeHTTP(resp, req)
+
+	if resp.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", resp.Code)
+	}
+
+	var out publicStatus
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		t.Fatalf("decode status: %v", err)
+	}
+	if len(out.Sessions) != 1 {
+		t.Fatalf("expected one session, got %d", len(out.Sessions))
+	}
+	if out.Sessions[0].State != model.StateRunning {
+		t.Fatalf("expected running state, got %s", out.Sessions[0].State)
+	}
+	if out.Sessions[0].Summary != "still working through the refactor" {
+		t.Fatalf("unexpected running summary: %q", out.Sessions[0].Summary)
+	}
+}
+
 func TestStatusErrorSummaryPrefersReadableCommandFailure(t *testing.T) {
 	st := store.New(30*time.Second, 0, log.New(io.Discard, "", 0))
 	now := time.Date(2026, 4, 25, 1, 0, 0, 0, time.UTC)
@@ -407,6 +452,15 @@ func TestStatusErrorSummaryPrefersReadableCommandFailure(t *testing.T) {
 		Error:           "FAIL\tgithub.com/vxider/codex-buddy/webserver/internal/api\t0.007s",
 		UpdatedAt:       now.Add(time.Second),
 	})
+	st.ApplyIngest(model.IngestRequest{
+		EventName:  "stop",
+		ReceivedAt: now.Add(2 * time.Second),
+		Payload: model.HookPayload{
+			SessionID: "sess-error",
+			Error:     "FAIL\tgithub.com/vxider/codex-buddy/webserver/internal/api\t0.007s",
+			TmuxPane:  "%44",
+		},
+	})
 
 	server := NewServer(config.Config{}, st, nil, &stubContinueExecutor{}, nil, log.New(io.Discard, "", 0))
 	req := httptest.NewRequest(http.MethodGet, "/v1/status", nil)
@@ -423,6 +477,9 @@ func TestStatusErrorSummaryPrefersReadableCommandFailure(t *testing.T) {
 	}
 	if len(out.Sessions) != 1 {
 		t.Fatalf("expected one session, got %d", len(out.Sessions))
+	}
+	if out.Sessions[0].State != model.StateError {
+		t.Fatalf("expected error state, got %s", out.Sessions[0].State)
 	}
 	if out.Sessions[0].Summary != "Command failed: go test ./webserver/..." {
 		t.Fatalf("unexpected error summary: %q", out.Sessions[0].Summary)
