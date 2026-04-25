@@ -157,7 +157,7 @@ func Default() Config {
 			ContinueHoldMS:   800,
 			Window: UConsoleWindowConfig{
 				Width:      920,
-				Height:     600,
+				Height:     540,
 				Fullscreen: false,
 			},
 			LED: UConsoleLEDConfig{
@@ -219,7 +219,7 @@ func applyDefaults(cfg *Config) {
 		cfg.UConsole.Window.Width = 920
 	}
 	if cfg.UConsole.Window.Height <= 0 {
-		cfg.UConsole.Window.Height = 600
+		cfg.UConsole.Window.Height = 540
 	}
 	if cfg.UConsole.LED.Pixels <= 0 {
 		cfg.UConsole.LED.Pixels = 8

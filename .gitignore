@@ -25,6 +25,7 @@ coverage.out
 *.prof
 *.coverprofile
 cover.out
+uconsole/tailscale-tray/tailscale-tray
 
 # Local runtime / temp files
 .env

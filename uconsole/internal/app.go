@@ -51,6 +51,7 @@ type App struct {
 	settingsEditor           *dialog.FormDialog
 	settingsDelete           *dialog.ConfirmDialog
 	continueConfirm          *dialog.ConfirmDialog
+	helpDialog               dialog.Dialog
 	statusUntil              time.Time
 	darkMode                 bool
 	selectedSettingsServerID string
@@ -331,6 +332,9 @@ func (a *App) buildUI() fyne.CanvasObject {
 	a.updatedLabel = widget.NewLabel("Updated -")
 	a.updatedLabel.Wrapping = fyne.TextWrapOff
 	a.updatedLabel.Truncation = fyne.TextTruncateClip
+	helpHint := widget.NewLabel("? Help")
+	helpHint.Wrapping = fyne.TextWrapOff
+	helpHint.Truncation = fyne.TextTruncateClip
 
 	a.tailscaleBadgeFill = canvas.NewRectangle(color.NRGBA{R: 0x4A, G: 0x4B, B: 0x50, A: 0xFF})
 	a.tailscaleBadgeFill.SetMinSize(fyne.NewSize(116, 38))
@@ -367,6 +371,7 @@ func (a *App) buildUI() fyne.CanvasObject {
 		a.updatedLabel,
 		layout.NewSpacer(),
 		a.refreshActivity,
+		helpHint,
 		a.settingsButton,
 		a.themeButton,
 		a.refreshButton,
@@ -426,6 +431,12 @@ func (a *App) installKeyHandlers() {
 			a.confirmContinue()
 		case fyne.KeyEscape:
 			a.dismissNotification()
+		case fyne.KeyJ:
+			a.scrollBy(88)
+			a.startScrollHold(fyne.KeyJ, 88)
+		case fyne.KeyK:
+			a.scrollBy(-88)
+			a.startScrollHold(fyne.KeyK, -88)
 		case fyne.KeyR:
 			go a.runManualRefresh()
 		case fyne.KeyS:
@@ -434,19 +445,13 @@ func (a *App) installKeyHandlers() {
 			a.toggleTheme()
 		}
 	})
+	a.window.Canvas().SetOnTypedRune(func(r rune) {
+		if r == '?' {
+			a.showHelpDialog()
+		}
+	})
 
 	if deskCanvas, ok := a.window.Canvas().(desktop.Canvas); ok {
-		deskCanvas.SetOnKeyDown(func(event *fyne.KeyEvent) {
-			if a.handleModalKey(event.Name) {
-				return
-			}
-			switch event.Name {
-			case fyne.KeyJ:
-				a.startScrollHold(fyne.KeyJ, 88)
-			case fyne.KeyK:
-				a.startScrollHold(fyne.KeyK, -88)
-			}
-		})
 		deskCanvas.SetOnKeyUp(func(event *fyne.KeyEvent) {
 			switch event.Name {
 			case fyne.KeyJ, fyne.KeyK:
@@ -462,6 +467,7 @@ func (a *App) handleModalKey(name fyne.KeyName) bool {
 	settingsEditor := a.settingsEditor
 	settingsDelete := a.settingsDelete
 	continueConfirm := a.continueConfirm
+	helpDialog := a.helpDialog
 	a.stateMu.RUnlock()
 
 	if settingsEditor != nil {
@@ -497,6 +503,16 @@ func (a *App) handleModalKey(name fyne.KeyName) bool {
 			return true
 		case fyne.KeyReturn, fyne.KeyEnter:
 			continueConfirm.Confirm()
+			return true
+		default:
+			return false
+		}
+	}
+
+	if helpDialog != nil {
+		switch name {
+		case fyne.KeyEscape:
+			helpDialog.Hide()
 			return true
 		default:
 			return false
@@ -1941,17 +1957,19 @@ func sessionRow(session SessionResponse, darkMode bool) fyne.CanvasObject {
 		title,
 	)
 
-	objects := []fyne.CanvasObject{header}
+	var middle fyne.CanvasObject = layout.NewSpacer()
 	if summary := firstNonEmptyText(session.AttentionSummary, session.Summary); summary != "" {
-		objects = append(objects, widget.NewSeparator())
 		summaryLabel := widget.NewLabel(summary)
 		summaryLabel.Wrapping = fyne.TextWrapWord
-		objects = append(objects, summaryLabel)
+		middle = summaryLabel
 	}
-	objects = append(objects, widget.NewSeparator())
-	objects = append(objects, metaText("Updated "+relativeTime(session.UpdatedAt), darkMode))
-
-	return container.NewVBox(objects...)
+	return container.NewBorder(
+		header,
+		metaText("Updated "+relativeTime(session.UpdatedAt), darkMode),
+		nil,
+		nil,
+		middle,
+	)
 }
 
 func sessionCell(session SessionResponse, darkMode bool) fyne.CanvasObject {
@@ -2180,6 +2198,45 @@ func (a *App) dismissNotification() {
 	}
 }
 
+func (a *App) showHelpDialog() {
+	a.stateMu.RLock()
+	currentDialog := a.helpDialog
+	a.stateMu.RUnlock()
+	if currentDialog != nil {
+		currentDialog.Show()
+		return
+	}
+
+	content := widget.NewLabel(strings.Join([]string{
+		"Press ? anytime to open this window.",
+		"",
+		"?  Show this help",
+		"R  Refresh all servers",
+		"S  Server settings",
+		"T  Toggle theme",
+		"J/K  Scroll",
+		"A  Acknowledge notification",
+		"C  Continue current session",
+		"Esc  Close popup/dialog",
+	}, "\n"))
+	content.Wrapping = fyne.TextWrapWord
+
+	dlg := dialog.NewCustom("Shortcuts", "Close (Esc)", content, a.window)
+	dlg.Resize(fyne.NewSize(760, 420))
+	dlg.SetOnClosed(func() {
+		a.stateMu.Lock()
+		if a.helpDialog == dlg {
+			a.helpDialog = nil
+		}
+		a.stateMu.Unlock()
+	})
+
+	a.stateMu.Lock()
+	a.helpDialog = dlg
+	a.stateMu.Unlock()
+	dlg.Show()
+}
+
 func (a *App) scrollBy(delta float32) {
 	if a.rootScroll == nil {
 		return
@@ -2205,8 +2262,6 @@ func (a *App) startScrollHold(key fyne.KeyName, delta float32) {
 	a.scrollHoldStop = stop
 	a.scrollHoldKey = key
 	a.scrollHoldMu.Unlock()
-
-	a.scrollBy(delta)
 
 	go func(stop <-chan struct{}, delta float32, key fyne.KeyName) {
 		initialDelay := time.NewTimer(180 * time.Millisecond)
