@@ -162,7 +162,7 @@ private extension CodexState {
             return .green
         case .running:
             return .blue
-        case .attention:
+        case .open:
             return .orange
         case .error:
             return .red

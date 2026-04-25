@@ -1518,7 +1518,7 @@ func badgeStyle(state model.State) (string, color.NRGBA) {
 	case model.StateRunning, model.StateRunningBash:
 		return "running", color.NRGBA{R: 0x19, G: 0x5F, B: 0x92, A: 0xFF}
 	case model.StateAttention:
-		return "attention", color.NRGBA{R: 0xBC, G: 0x7A, B: 0x00, A: 0xFF}
+		return "open", color.NRGBA{R: 0xBC, G: 0x7A, B: 0x00, A: 0xFF}
 	case model.StateError:
 		return "error", color.NRGBA{R: 0xB6, G: 0x3B, B: 0x2F, A: 0xFF}
 	default:
@@ -1526,6 +1526,38 @@ func badgeStyle(state model.State) (string, color.NRGBA) {
 	}
 }
 
+func titleForState(state model.State) string {
+	switch state {
+	case model.StateAttention:
+		return "Open"
+	case model.StateError:
+		return "This run hit an error"
+	case model.StateRunning, model.StateRunningBash:
+		return "Codex is working"
+	case model.StateIdle:
+		return "Currently idle"
+	default:
+		return "Codex companion"
+	}
+}
+
+func summaryForState(state model.State, connected bool, lastError string) string {
+	if !connected && lastError != "" {
+		return "Connection to the remote buddy is unavailable: " + lastError
+	}
+	switch state {
+	case model.StateAttention:
+		return "A run just finished. It is open for a follow-up step."
+	case model.StateError:
+		return "An error notification will pop up when intervention is needed."
+	case model.StateRunning, model.StateRunningBash:
+		return "Remote session is active. Alerts and quick actions stay available here."
+	case model.StateIdle:
+		return "There is no active task right now."
+	default:
+		return "Waiting for remote codex-buddy state."
+	}
+}
 func cardTitle(primary *NotificationResponse) string {
 	if primary == nil {
 		return "Primary Card"
@@ -1534,7 +1566,7 @@ func cardTitle(primary *NotificationResponse) string {
 	case model.NotificationError:
 		return "Error Card"
 	default:
-		return "Attention Card"
+		return "Open Card"
 	}
 }
 

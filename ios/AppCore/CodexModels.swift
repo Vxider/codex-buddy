@@ -5,8 +5,29 @@ enum CodexState: String, Codable, CaseIterable, Hashable {
     case idle
     case running
     case runningBash = "running_bash"
-    case attention
+    case open
     case error
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.singleValueContainer()
+        let rawValue = try container.decode(String.self)
+        switch rawValue {
+        case "offline":
+            self = .offline
+        case "idle":
+            self = .idle
+        case "running":
+            self = .running
+        case "running_bash":
+            self = .runningBash
+        case "open", "attention":
+            self = .open
+        case "error":
+            self = .error
+        default:
+            throw DecodingError.dataCorruptedError(in: container, debugDescription: "Unknown CodexState: \(rawValue)")
+        }
+    }
 
     var normalized: CodexState {
         switch self {
@@ -25,8 +46,8 @@ enum CodexState: String, Codable, CaseIterable, Hashable {
             return "Idle"
         case .running:
             return "Running"
-        case .attention:
-            return "Attention"
+        case .open:
+            return "Open"
         case .error:
             return "Error"
         case .runningBash:
@@ -42,8 +63,8 @@ enum CodexState: String, Codable, CaseIterable, Hashable {
             return "😊"
         case .running:
             return "🫡"
-        case .attention:
-            return "⚠️"
+        case .open:
+            return "🟠"
         case .error:
             return "😵"
         case .runningBash:
@@ -59,7 +80,7 @@ enum CodexState: String, Codable, CaseIterable, Hashable {
             return "green"
         case .running:
             return "blue"
-        case .attention:
+        case .open:
             return "orange"
         case .error:
             return "red"

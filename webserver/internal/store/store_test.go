@@ -85,6 +85,123 @@ func TestCompletedStopStaysIdle(t *testing.T) {
 	}
 }
 
+func TestChineseFollowUpOfferStopBecomesAttention(t *testing.T) {
+	st := New(0, 0, log.New(io.Discard, "", 0))
+	now := time.Now().UTC()
+
+	snapshot := st.ApplyIngest(model.IngestRequest{
+		EventName:  "user-prompt-submit",
+		ReceivedAt: now,
+		Payload: model.HookPayload{
+			SessionID: "sess-cn-attention",
+			Prompt:    "排查 tailscale https 录音问题",
+			TmuxPane:  "%9",
+		},
+	})
+	if snapshot.OverallState != model.StateRunning {
+		t.Fatalf("expected running, got %s", snapshot.OverallState)
+	}
+
+	snapshot = st.ApplyIngest(model.IngestRequest{
+		EventName:  "stop",
+		ReceivedAt: now.Add(time.Second),
+		Payload: model.HookPayload{
+			SessionID:            "sess-cn-attention",
+			TmuxPane:             "%9",
+			LastAssistantMessage: "如果你愿意，我下一步可以继续帮你做一次 Tailscale HTTPS 下的录音可用性确认。",
+		},
+	})
+	if snapshot.OverallState != model.StateAttention {
+		t.Fatalf("expected attention after Chinese follow-up offer, got %s", snapshot.OverallState)
+	}
+
+	session, ok := st.Session("sess-cn-attention")
+	if !ok {
+		t.Fatalf("expected session")
+	}
+	if session.State != model.StateAttention {
+		t.Fatalf("expected attention session, got %s", session.State)
+	}
+}
+
+func TestChineseImmediateStartOfferStopBecomesAttention(t *testing.T) {
+	st := New(0, 0, log.New(io.Discard, "", 0))
+	now := time.Now().UTC()
+
+	snapshot := st.ApplyIngest(model.IngestRequest{
+		EventName:  "user-prompt-submit",
+		ReceivedAt: now,
+		Payload: model.HookPayload{
+			SessionID: "sess-cn-direct-start",
+			Prompt:    "排查 ASR 浏览器 E2E",
+			TmuxPane:  "%10",
+		},
+	})
+	if snapshot.OverallState != model.StateRunning {
+		t.Fatalf("expected running, got %s", snapshot.OverallState)
+	}
+
+	snapshot = st.ApplyIngest(model.IngestRequest{
+		EventName:  "stop",
+		ReceivedAt: now.Add(time.Second),
+		Payload: model.HookPayload{
+			SessionID:            "sess-cn-direct-start",
+			TmuxPane:             "%10",
+			LastAssistantMessage: "如果你要，我下一步就直接开始做这条 ASR 的浏览器 E2E 调试。",
+		},
+	})
+	if snapshot.OverallState != model.StateAttention {
+		t.Fatalf("expected attention after Chinese direct-start offer, got %s", snapshot.OverallState)
+	}
+
+	session, ok := st.Session("sess-cn-direct-start")
+	if !ok {
+		t.Fatalf("expected session")
+	}
+	if session.State != model.StateAttention {
+		t.Fatalf("expected attention session, got %s", session.State)
+	}
+}
+
+func TestChineseContinueNextRoundOfferStopBecomesAttention(t *testing.T) {
+	st := New(0, 0, log.New(io.Discard, "", 0))
+	now := time.Now().UTC()
+
+	snapshot := st.ApplyIngest(model.IngestRequest{
+		EventName:  "user-prompt-submit",
+		ReceivedAt: now,
+		Payload: model.HookPayload{
+			SessionID: "sess-cn-next-round",
+			Prompt:    "收口旧 biddata 图片迁移策略",
+			TmuxPane:  "%11",
+		},
+	})
+	if snapshot.OverallState != model.StateRunning {
+		t.Fatalf("expected running, got %s", snapshot.OverallState)
+	}
+
+	snapshot = st.ApplyIngest(model.IngestRequest{
+		EventName:  "stop",
+		ReceivedAt: now.Add(time.Second),
+		Payload: model.HookPayload{
+			SessionID:            "sess-cn-next-round",
+			TmuxPane:             "%11",
+			LastAssistantMessage: "当前还留一个明确边界：历史上已经生成、但文件名里没有用户归属前缀的旧 `biddata` 图片，现在是“登录可读”但还不是“按所有者强隔离”。如果你继续，我下一轮会顺着这条线把旧资源迁移/兼容策略也收口掉。",
+		},
+	})
+	if snapshot.OverallState != model.StateAttention {
+		t.Fatalf("expected attention after Chinese next-round follow-up offer, got %s", snapshot.OverallState)
+	}
+
+	session, ok := st.Session("sess-cn-next-round")
+	if !ok {
+		t.Fatalf("expected session")
+	}
+	if session.State != model.StateAttention {
+		t.Fatalf("expected attention session, got %s", session.State)
+	}
+}
+
 func TestApplyTranscriptUpdateEnrichesSession(t *testing.T) {
 	st := New(50*time.Millisecond, 50*time.Millisecond, log.New(io.Discard, "", 0))
 	update := model.TranscriptUpdate{
@@ -108,6 +225,42 @@ func TestApplyTranscriptUpdateEnrichesSession(t *testing.T) {
 	}
 	if session.CWD != "/repo" {
 		t.Fatalf("unexpected cwd: %q", session.CWD)
+	}
+}
+
+func TestTranscriptUpdateCanPromoteIdleSessionToAttention(t *testing.T) {
+	st := New(0, 0, log.New(io.Discard, "", 0))
+	now := time.Now().UTC()
+
+	st.ApplyIngest(model.IngestRequest{
+		EventName:  "session-start",
+		ReceivedAt: now,
+		Payload: model.HookPayload{
+			SessionID: "sess-bootstrap-idle",
+			TmuxPane:  "%12",
+		},
+	})
+
+	st.ApplyTranscriptUpdate(model.TranscriptUpdate{
+		SessionID:            "sess-bootstrap-idle",
+		LastAssistantMessage: "如果你愿意，我下一步可以继续帮你做一次 Tailscale HTTPS 下的录音可用性确认。",
+		UpdatedAt:            now.Add(time.Second),
+	})
+
+	session, ok := st.Session("sess-bootstrap-idle")
+	if !ok {
+		t.Fatalf("expected session")
+	}
+	if session.State != model.StateAttention {
+		t.Fatalf("expected transcript recovery to promote idle session to attention, got %s", session.State)
+	}
+
+	items := st.Notifications()
+	if len(items) != 1 {
+		t.Fatalf("expected one attention notification, got %d", len(items))
+	}
+	if items[0].Kind != model.NotificationAttention {
+		t.Fatalf("expected attention notification, got %s", items[0].Kind)
 	}
 }
 

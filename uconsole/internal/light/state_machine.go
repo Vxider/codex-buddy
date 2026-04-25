@@ -40,7 +40,7 @@ func effectiveState(input Input) (model.State, string) {
 		case model.NotificationError:
 			return model.StateError, fmt.Sprintf("notification:%s:error", input.PrimaryNotification.ID)
 		case model.NotificationAttention:
-			return model.StateAttention, fmt.Sprintf("notification:%s:attention", input.PrimaryNotification.ID)
+			return model.StateAttention, fmt.Sprintf("notification:%s:open", input.PrimaryNotification.ID)
 		}
 	}
 

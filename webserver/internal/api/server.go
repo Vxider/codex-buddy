@@ -800,7 +800,7 @@ var debugPageHTML = `<!doctype html>
     .status-offline { background: #111827; border-color: #374151; }
     .status-idle { background: #0f172a; border-color: #334155; }
     .status-running { background: #172554; border-color: #2563eb; }
-    .status-attention { background: #3f2b02; border-color: #f59e0b; }
+    .status-open { background: #3f2b02; border-color: #f59e0b; }
     .status-error { background: #3b0a0a; border-color: #ef4444; }
     .muted { color: #94a3b8; font-size: 12px; }
     .summary { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
@@ -816,7 +816,7 @@ var debugPageHTML = `<!doctype html>
   <div class="wrap">
     <div class="card" style="margin-top:16px;">
       <h1>codex-buddy Status</h1>
-      <p class="muted">Shows aggregate state, session summaries, attention details, and continue capability for browser, uConsole, and mobile clients.</p>
+      <p class="muted">Shows aggregate state, session summaries, open-state details, and continue capability for browser, uConsole, and mobile clients.</p>
       <div class="summary">
         <div>
           <div class="muted">aggregate status</div>
@@ -834,7 +834,7 @@ var debugPageHTML = `<!doctype html>
   </div>
   <script>
     let source;
-    const states = ['offline', 'idle', 'running', 'attention', 'error'];
+    const states = ['offline', 'idle', 'running', 'open', 'error'];
     function escapeHTML(value) {
       return String(value || '')
         .replaceAll('&', '&amp;')
@@ -846,6 +846,7 @@ var debugPageHTML = `<!doctype html>
     function normalizeState(value) {
       const state = String(value || '').toLowerCase();
       if (state === 'running_bash') return 'running';
+      if (state === 'attention') return 'open';
       return states.includes(state) ? state : 'offline';
     }
     function renderStateChip(el, state) {

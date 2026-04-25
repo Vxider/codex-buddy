@@ -177,6 +177,11 @@ func (s *Store) ApplyTranscriptUpdate(update model.TranscriptUpdate) model.Statu
 	if update.Error != "" {
 		session.LastError = preview(update.Error)
 	}
+	if session.State == model.StateIdle && needsAttentionFromMessage(session.LastAssistantMessage) {
+		session.State = model.StateAttention
+		session.StateDetail = string(model.StateAttention)
+		session.CurrentAttentionDeadline = s.attentionDeadline()
+	}
 
 	s.appendRecentEventLocked(model.RecentEvent{
 		Time:      update.UpdatedAt,
@@ -460,9 +465,33 @@ func needsAttentionFromMessage(message string) bool {
 		"continue after",
 		"would you like me to",
 		"if you'd like me to",
+		"if you'd like, i can",
+		"if you want, i can",
+		"let me know if you'd like",
 		"let me know if you want",
 		"please confirm",
 		"please approve",
+		"如果你愿意",
+		"如果你希望",
+		"如果你想",
+		"如果你要",
+		"如果需要",
+		"如果你继续",
+		"要的话我可以",
+		"要不要我",
+		"是否要我",
+		"请确认",
+		"请批准",
+		"等待你确认",
+		"等你确认",
+		"我下一步可以继续",
+		"我下一步就直接开始",
+		"我下一步就开始",
+		"我下一轮会",
+		"下一轮会",
+		"我可以继续帮你",
+		"继续帮你做",
+		"直接开始做",
 	}
 	for _, marker := range attentionMarkers {
 		if strings.Contains(text, marker) {
@@ -470,7 +499,7 @@ func needsAttentionFromMessage(message string) bool {
 		}
 	}
 
-	if strings.HasSuffix(text, "?") {
+	if strings.HasSuffix(text, "?") || strings.HasSuffix(text, "？") {
 		return true
 	}
 

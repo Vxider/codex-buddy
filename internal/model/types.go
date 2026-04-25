@@ -9,7 +9,8 @@ const (
 	StateIdle        State = "idle"
 	StateRunning     State = "running"
 	StateRunningBash State = "running_bash"
-	StateAttention   State = "attention"
+	StateOpen        State = "open"
+	StateAttention   State = StateOpen
 	StateError       State = "error"
 )
 
