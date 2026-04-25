@@ -52,7 +52,7 @@
       "enabled": true,
       "pixels": 8,
       "brightness": 40,
-      "gpio_pin": 18,
+      "gpio_pin": 40,
       "dma_num": 10,
       "frequency": 800000
     }
