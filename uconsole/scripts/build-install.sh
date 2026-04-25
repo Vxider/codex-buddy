@@ -23,6 +23,11 @@ EOF
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd -- "${SCRIPT_DIR}/../.." && pwd)"
 
+GO_HOME_BASE="${HOME}"
+if [[ ! -d "${GO_HOME_BASE}" || ! -w "${GO_HOME_BASE}" ]]; then
+  GO_HOME_BASE="${TMPDIR:-/tmp}/codex-buddy-go"
+fi
+
 ENABLE_WS281X=0
 RESTART_SERVICE=0
 DRY_RUN=0
@@ -69,16 +74,23 @@ if ! command -v go >/dev/null 2>&1; then
 fi
 
 if [[ -z "${GOPATH:-}" || "${GOPATH:-}" == /Users/* ]]; then
-  export GOPATH="${HOME}/.go"
+  export GOPATH="${GO_HOME_BASE}/.go"
 fi
 if [[ -z "${GOMODCACHE:-}" || "${GOMODCACHE:-}" == /Users/* ]]; then
   export GOMODCACHE="${GOPATH}/pkg/mod"
 fi
 if [[ -z "${GOCACHE:-}" || "${GOCACHE:-}" == /Users/* ]]; then
-  export GOCACHE="${HOME}/.cache/go-build"
+  export GOCACHE="${GO_HOME_BASE}/.cache/go-build"
 fi
 
 mkdir -p "${GOPATH}" "${GOMODCACHE}" "${GOCACHE}"
+
+REAL_CC_VALUE="${CC:-$(go env CC 2>/dev/null || true)}"
+if [[ -z "${REAL_CC_VALUE}" ]]; then
+  REAL_CC_VALUE="$(command -v aarch64-linux-gnu-gcc 2>/dev/null || command -v gcc)"
+fi
+export REAL_CC="${REAL_CC_VALUE}"
+export CC="${SCRIPT_DIR}/gcc-no-base64.sh"
 
 TAGS=("uconsole_gui")
 if [[ "${ENABLE_WS281X}" -eq 1 ]]; then

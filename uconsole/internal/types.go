@@ -28,6 +28,9 @@ type SessionResponse struct {
 	AttentionSummary string                 `json:"attention_summary,omitempty"`
 	CanContinue      bool                   `json:"can_continue,omitempty"`
 	ContinueAction   *ContinueActionPayload `json:"continue_action,omitempty"`
+	ServerID         string                 `json:"-"`
+	ServerName       string                 `json:"-"`
+	ServerURL        string                 `json:"-"`
 }
 
 type ContinueActionPayload struct {
@@ -52,6 +55,9 @@ type NotificationResponse struct {
 	UpdatedAt   time.Time                  `json:"updated_at"`
 	ActionToken string                     `json:"action_token,omitempty"`
 	Actions     []model.NotificationAction `json:"actions,omitempty"`
+	ServerID    string                     `json:"-"`
+	ServerName  string                     `json:"-"`
+	ServerURL   string                     `json:"-"`
 }
 
 func (s StatusResponse) ToSnapshot() model.StatusSnapshot {
