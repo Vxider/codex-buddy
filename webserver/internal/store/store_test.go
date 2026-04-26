@@ -48,6 +48,21 @@ func TestApplyIngestTransitions(t *testing.T) {
 	}
 }
 
+func TestEmptyStoreSnapshotStaysIdle(t *testing.T) {
+	st := New(0, 0, log.New(io.Discard, "", 0))
+
+	snapshot := st.Snapshot()
+	if snapshot.OverallState != model.StateIdle {
+		t.Fatalf("expected empty store overall state to be idle, got %s", snapshot.OverallState)
+	}
+	if snapshot.OverallStateDetail != string(model.StateIdle) {
+		t.Fatalf("expected empty store detail to be idle, got %q", snapshot.OverallStateDetail)
+	}
+	if snapshot.SessionsCount != 0 {
+		t.Fatalf("expected no sessions, got %d", snapshot.SessionsCount)
+	}
+}
+
 func TestCompletedStopStaysIdle(t *testing.T) {
 	st := New(0, 0, log.New(io.Discard, "", 0))
 	now := time.Now().UTC()

@@ -903,6 +903,7 @@ func markServerFailure(snapshot serverSnapshot, now time.Time, err error, offlin
 }
 
 func annotateStatus(server BuddyServer, status StatusResponse) StatusResponse {
+	status.OverallState = normalizeCompatState(status.OverallState)
 	status.Sessions = annotateSessions(server, status.Sessions)
 	return status
 }
@@ -913,6 +914,7 @@ func annotateSessions(server BuddyServer, sessions []SessionResponse) []SessionR
 	}
 	out := make([]SessionResponse, 0, len(sessions))
 	for _, session := range sessions {
+		session.State = normalizeSessionState(session.State)
 		session.ServerID = server.ID
 		session.ServerName = server.DisplayName()
 		session.ServerURL = server.BaseURL
@@ -927,6 +929,7 @@ func annotateNotifications(server BuddyServer, notifications []NotificationRespo
 	}
 	out := make([]NotificationResponse, 0, len(notifications))
 	for _, item := range notifications {
+		item.Kind = normalizeCompatNotificationKind(item.Kind)
 		item.ServerID = server.ID
 		item.ServerName = server.DisplayName()
 		item.ServerURL = server.BaseURL
@@ -1017,6 +1020,7 @@ func aggregateSnapshots(snapshots []serverSnapshot) (StatusResponse, []Notificat
 }
 
 func stateRank(state model.State) int {
+	state = normalizeCompatState(state)
 	switch state {
 	case model.StateError:
 		return 5
@@ -1719,6 +1723,7 @@ func offlineStatus() StatusResponse {
 }
 
 func badgeStyle(state model.State) (string, color.NRGBA) {
+	state = normalizeCompatState(state)
 	switch state {
 	case model.StateIdle:
 		return "idle", color.NRGBA{R: 0x58, G: 0x72, B: 0x58, A: 0xFF}
@@ -1734,6 +1739,7 @@ func badgeStyle(state model.State) (string, color.NRGBA) {
 }
 
 func titleForState(state model.State) string {
+	state = normalizeCompatState(state)
 	switch state {
 	case model.StateAttention:
 		return "Open"
@@ -1749,6 +1755,7 @@ func titleForState(state model.State) string {
 }
 
 func summaryForState(state model.State, connected bool, lastError string) string {
+	state = normalizeCompatState(state)
 	if !connected && lastError != "" {
 		return "Connection to the remote buddy is unavailable: " + lastError
 	}
@@ -1765,18 +1772,20 @@ func summaryForState(state model.State, connected bool, lastError string) string
 		return "Waiting for remote codex-buddy state."
 	}
 }
+
 func sessionBadgeStyle(state model.State) (string, color.NRGBA) {
+	state = normalizeSessionState(state)
 	switch state {
 	case model.StateIdle:
 		return "idle", color.NRGBA{R: 0x58, G: 0x72, B: 0x58, A: 0xFF}
 	case model.StateRunning, model.StateRunningBash:
 		return "running", color.NRGBA{R: 0x19, G: 0x5F, B: 0x92, A: 0xFF}
 	case model.StateAttention:
-		return "attention", color.NRGBA{R: 0xBC, G: 0x7A, B: 0x00, A: 0xFF}
+		return "open", color.NRGBA{R: 0xBC, G: 0x7A, B: 0x00, A: 0xFF}
 	case model.StateError:
 		return "error", color.NRGBA{R: 0xB6, G: 0x3B, B: 0x2F, A: 0xFF}
 	default:
-		return "unknown", color.NRGBA{R: 0x4A, G: 0x4B, B: 0x50, A: 0xFF}
+		return "idle", color.NRGBA{R: 0x58, G: 0x72, B: 0x58, A: 0xFF}
 	}
 }
 func cardTitle(primary *NotificationResponse) string {
@@ -2640,5 +2649,6 @@ func cardBorder(darkMode bool, highlight bool) color.NRGBA {
 }
 
 func aggregateNeedsAttention(state model.State) bool {
+	state = normalizeCompatState(state)
 	return state == model.StateAttention || state == model.StateError
 }

@@ -92,7 +92,8 @@ type TranscriptUpdate struct {
 type NotificationKind string
 
 const (
-	NotificationAttention NotificationKind = "attention"
+	NotificationOpen      NotificationKind = "open"
+	NotificationAttention NotificationKind = NotificationOpen
 	NotificationError     NotificationKind = "error"
 )
 

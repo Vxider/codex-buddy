@@ -65,7 +65,7 @@ func (s StatusResponse) ToSnapshot() model.StatusSnapshot {
 	for _, session := range s.Sessions {
 		sessions = append(sessions, model.SessionSnapshot{
 			SessionID:            session.SessionID,
-			State:                session.State,
+			State:                normalizeSessionState(session.State),
 			StateDetail:          session.StateDetail,
 			LastAssistantMessage: session.Summary,
 			UpdatedAt:            session.UpdatedAt,
@@ -86,7 +86,7 @@ func (n NotificationResponse) ToSnapshot() model.NotificationSnapshot {
 	return model.NotificationSnapshot{
 		ID:          n.ID,
 		SessionID:   n.SessionID,
-		Kind:        n.Kind,
+		Kind:        normalizeCompatNotificationKind(n.Kind),
 		State:       n.State,
 		Title:       n.Title,
 		Summary:     n.Summary,

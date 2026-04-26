@@ -326,8 +326,8 @@ func (s *Server) decorateSnapshot(snapshot model.StatusSnapshot) model.StatusSna
 	snapshot.SessionsCount = len(snapshot.Sessions)
 	if len(snapshot.Sessions) == 0 {
 		snapshot.ActiveSessionID = ""
-		snapshot.OverallState = model.StateOffline
-		snapshot.OverallStateDetail = ""
+		snapshot.OverallState = model.StateIdle
+		snapshot.OverallStateDetail = string(model.StateIdle)
 	} else {
 		active := snapshot.Sessions[0]
 		snapshot.ActiveSessionID = active.SessionID

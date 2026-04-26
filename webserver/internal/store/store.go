@@ -366,11 +366,12 @@ func (s *Store) Subscribe() (<-chan model.StatusSnapshot, func()) {
 func (s *Store) snapshotLocked() model.StatusSnapshot {
 	sessions := s.sortedSessionsLocked()
 	snapshot := model.StatusSnapshot{
-		ServerTime:    time.Now().UTC(),
-		OverallState:  model.StateOffline,
-		SessionsCount: len(sessions),
-		Sessions:      sessions,
-		RecentEvents:  append([]model.RecentEvent(nil), s.recentEvents...),
+		ServerTime:         time.Now().UTC(),
+		OverallState:       model.StateIdle,
+		OverallStateDetail: string(model.StateIdle),
+		SessionsCount:      len(sessions),
+		Sessions:           sessions,
+		RecentEvents:       append([]model.RecentEvent(nil), s.recentEvents...),
 	}
 
 	if len(sessions) == 0 {

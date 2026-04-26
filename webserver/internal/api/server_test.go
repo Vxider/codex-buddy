@@ -103,6 +103,33 @@ func TestStatusIncludesAttentionSummaryAndContinueAction(t *testing.T) {
 	}
 }
 
+func TestEmptyStatusIsIdleWhenServerIsReachable(t *testing.T) {
+	st := store.New(0, 0, log.New(io.Discard, "", 0))
+	server := NewServer(config.Config{}, st, nil, &stubContinueExecutor{}, nil, log.New(io.Discard, "", 0))
+
+	req := httptest.NewRequest(http.MethodGet, "/v1/status", nil)
+	resp := httptest.NewRecorder()
+	server.Handler().ServeHTTP(resp, req)
+
+	if resp.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", resp.Code)
+	}
+
+	var out publicStatus
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		t.Fatalf("decode status: %v", err)
+	}
+	if out.OverallState != model.StateIdle {
+		t.Fatalf("expected idle overall state for reachable empty server, got %s", out.OverallState)
+	}
+	if out.OverallStateDetail != string(model.StateIdle) {
+		t.Fatalf("expected idle state detail, got %q", out.OverallStateDetail)
+	}
+	if out.SessionsCount != 0 {
+		t.Fatalf("expected zero sessions, got %d", out.SessionsCount)
+	}
+}
+
 func TestStatusTitleDoesNotReuseAssistantSummary(t *testing.T) {
 	st := store.New(30*time.Second, 0, log.New(io.Discard, "", 0))
 	now := time.Date(2026, 4, 23, 12, 0, 0, 0, time.UTC)
