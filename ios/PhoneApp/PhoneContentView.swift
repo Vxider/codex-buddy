@@ -6,6 +6,14 @@ struct PhoneContentView: View {
     @State private var presentedErrorMessage: String?
     @Environment(\.scenePhase) private var scenePhase
 
+    private var openSessions: [CodexSessionSummary] {
+        model.snapshot.sessions.filter { $0.needsOpen }
+    }
+
+    private var primarySessions: [CodexSessionSummary] {
+        model.snapshot.sessions.filter { !$0.needsOpen }
+    }
+
     var body: some View {
         NavigationStack {
             List {
@@ -96,42 +104,101 @@ struct PhoneContentView: View {
                 Text("No active sessions")
                     .foregroundStyle(.secondary)
             } else {
-                ForEach(model.snapshot.sessions) { session in
-                    VStack(alignment: .leading, spacing: 8) {
-                        HStack(alignment: .top) {
-                            VStack(alignment: .leading, spacing: 4) {
-                                Text(session.phoneListTitle)
-                                    .font(.headline)
-                                Text(session.shortSessionID ?? CodexFormatters.shortSessionLabel(session.sessionID))
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                            }
-                            Spacer()
-                            sessionStateBadge(session.state)
-                        }
-                        if !session.phoneAssistantSummary.isEmpty {
-                            Text(session.phoneAssistantSummary)
-                                .font(.subheadline)
-                        }
-                        HStack {
-                            Text("Updated \(CodexFormatters.relativeTime(session.updatedAt))")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                            Spacer()
-                            if session.canContinue {
-                                Button(session.continueAction?.label ?? "Continue") {
-                                    Task { await model.continueSession(session) }
-                                }
-                                .buttonStyle(.borderedProminent)
-                                .tint(.teal)
-                                .controlSize(.small)
-                            }
-                        }
-                    }
-                    .padding(.vertical, 4)
+                if !openSessions.isEmpty {
+                    openSessionsCard
+                }
+                ForEach(primarySessions) { session in
+                    sessionRow(session)
                 }
             }
         }
+    }
+
+    private var openSessionsCard: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(alignment: .top) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Open")
+                        .font(.headline)
+                    Text("\(openSessions.count) session\(openSessions.count == 1 ? "" : "s")")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+                sessionStateBadge(.open)
+            }
+            ForEach(openSessions) { session in
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack(alignment: .top) {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(session.phoneListTitle)
+                                .font(.subheadline.weight(.semibold))
+                            Text(session.shortSessionID ?? CodexFormatters.shortSessionLabel(session.sessionID))
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                        Spacer()
+                    }
+                    if !session.phoneSummary.isEmpty {
+                        Text(session.phoneSummary)
+                            .font(.subheadline)
+                    }
+                    HStack {
+                        Text("Updated \(CodexFormatters.relativeTime(session.updatedAt))")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        Spacer()
+                        if session.canContinue {
+                            Button(session.continueAction?.label ?? "Continue") {
+                                Task { await model.continueSession(session) }
+                            }
+                            .buttonStyle(.borderedProminent)
+                            .tint(.teal)
+                            .controlSize(.small)
+                        }
+                    }
+                }
+                if session.id != openSessions.last?.id {
+                    Divider()
+                }
+            }
+        }
+        .padding(.vertical, 4)
+    }
+
+    private func sessionRow(_ session: CodexSessionSummary) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(alignment: .top) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(session.phoneListTitle)
+                        .font(.headline)
+                    Text(session.shortSessionID ?? CodexFormatters.shortSessionLabel(session.sessionID))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+                sessionStateBadge(session.state)
+            }
+            if !session.phoneAssistantSummary.isEmpty {
+                Text(session.phoneAssistantSummary)
+                    .font(.subheadline)
+            }
+            HStack {
+                Text("Updated \(CodexFormatters.relativeTime(session.updatedAt))")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Spacer()
+                if session.canContinue {
+                    Button(session.continueAction?.label ?? "Continue") {
+                        Task { await model.continueSession(session) }
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .tint(.teal)
+                    .controlSize(.small)
+                }
+            }
+        }
+        .padding(.vertical, 4)
     }
 
     private func sessionStateBadge(_ state: CodexState) -> some View {
