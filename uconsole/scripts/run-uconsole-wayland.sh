@@ -4,7 +4,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 UCONSOLE_DIR="$(cd -- "${SCRIPT_DIR}/.." && pwd)"
 
-SERVER_URL="${1:-http://dgx-spark.tail97583.ts.net:8787}"
+SERVER_URL="${1:-http://127.0.0.1:8787}"
 BIN_PATH="${UCONSOLE_DIR}/bin/codex-buddy-wayland"
 HOME_BASE="${TMPDIR:-/tmp}/codex-buddy-home"
 

@@ -381,13 +381,22 @@ func (a *App) buildUI() fyne.CanvasObject {
 	a.sessionList = container.NewVBox(widget.NewLabel("No active sessions"))
 
 	content := container.NewVBox(
-		header,
-		a.exitNodeMenu,
 		a.sectionCard("Servers", darkMode, a.serverList, false),
 		a.sectionCard("Sessions", darkMode, a.sessionList, true),
 	)
 	a.rootScroll = container.NewVScroll(content)
-	return container.NewMax(a.bgFill, container.NewPadded(a.rootScroll))
+
+	topBar := container.NewVBox(
+		header,
+		a.exitNodeMenu,
+	)
+
+	return container.NewMax(
+		a.bgFill,
+		container.NewPadded(
+			container.NewBorder(topBar, nil, nil, nil, a.rootScroll),
+		),
+	)
 }
 
 func (a *App) sectionCard(title string, darkMode bool, content fyne.CanvasObject, highlightOnAttention bool) fyne.CanvasObject {
@@ -1321,7 +1330,7 @@ func (a *App) showServerEditor(editing *BuddyServer) {
 		nameEntry.SetText(editing.Name)
 		urlEntry.SetText(editing.BaseURL)
 	} else {
-		urlEntry.SetPlaceHolder("https://dgx-spark.tail97583.ts.net:8787")
+		urlEntry.SetPlaceHolder("http://127.0.0.1:8787")
 	}
 
 	items := []*widget.FormItem{
@@ -1556,6 +1565,20 @@ func summaryForState(state model.State, connected bool, lastError string) string
 		return "There is no active task right now."
 	default:
 		return "Waiting for remote codex-buddy state."
+	}
+}
+func sessionBadgeStyle(state model.State) (string, color.NRGBA) {
+	switch state {
+	case model.StateIdle:
+		return "idle", color.NRGBA{R: 0x58, G: 0x72, B: 0x58, A: 0xFF}
+	case model.StateRunning, model.StateRunningBash:
+		return "running", color.NRGBA{R: 0x19, G: 0x5F, B: 0x92, A: 0xFF}
+	case model.StateAttention:
+		return "attention", color.NRGBA{R: 0xBC, G: 0x7A, B: 0x00, A: 0xFF}
+	case model.StateError:
+		return "error", color.NRGBA{R: 0xB6, G: 0x3B, B: 0x2F, A: 0xFF}
+	default:
+		return "unknown", color.NRGBA{R: 0x4A, G: 0x4B, B: 0x50, A: 0xFF}
 	}
 }
 func cardTitle(primary *NotificationResponse) string {
@@ -2009,7 +2032,7 @@ func sessionCell(session SessionResponse, darkMode bool) fyne.CanvasObject {
 }
 
 func stateBadge(state model.State) fyne.CanvasObject {
-	label, fill := badgeStyle(state)
+	label, fill := sessionBadgeStyle(state)
 	bg := canvas.NewRectangle(fill)
 	bg.SetMinSize(fyne.NewSize(110, 32))
 	bg.CornerRadius = 10

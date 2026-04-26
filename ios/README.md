@@ -29,8 +29,8 @@ This directory contains the first public-source version of the iPhone and Apple 
 
 ## Base URL examples
 
-- `http://100.82.10.4:8787`
-- `https://codex-box.tailnet-name.ts.net`
+- `http://<codex-host>:8787`
+- `https://<codex-host>`
 
 ## Runtime model
 

@@ -4,7 +4,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 UCONSOLE_DIR="$(cd -- "${SCRIPT_DIR}/.." && pwd)"
 
-SERVER_URL="${1:-http://dgx-spark.tail97583.ts.net:8787}"
+SERVER_URL="${1:-http://127.0.0.1:8787}"
 BIN_SOURCE="${UCONSOLE_DIR}/bin/codex-buddy-wayland"
 ICON_SOURCE="${UCONSOLE_DIR}/assets/codex-buddy-uconsole.png"
 DESKTOP_TEMPLATE="${SCRIPT_DIR}/codex-buddy-uconsole.desktop.template"
@@ -39,10 +39,12 @@ escape_sed_replacement() {
 
 BIN_TARGET_ESCAPED="$(escape_sed_replacement "${BIN_TARGET}")"
 SERVER_URL_ESCAPED="$(escape_sed_replacement "${SERVER_URL}")"
+ICON_TARGET_ESCAPED="$(escape_sed_replacement "${ICON_TARGET}")"
 
 sed \
   -e "s|__BIN_TARGET__|${BIN_TARGET_ESCAPED}|g" \
   -e "s|__SERVER_URL__|${SERVER_URL_ESCAPED}|g" \
+  -e "s|__ICON_TARGET__|${ICON_TARGET_ESCAPED}|g" \
   "${DESKTOP_TEMPLATE}" > "${DESKTOP_FILE}"
 
 chmod +x "${DESKTOP_FILE}"
