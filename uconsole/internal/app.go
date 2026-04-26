@@ -65,7 +65,7 @@ type App struct {
 	badgeFill          *canvas.Rectangle
 	badgeLabel         *canvas.Text
 	updatedLabel       *widget.Label
-	serverList         *fyne.Container
+	serverStrip        *fyne.Container
 	sessionList        *fyne.Container
 	themeButton        *widget.Button
 	refreshButton      *widget.Button
@@ -75,10 +75,7 @@ type App struct {
 	settingsSummary    *widget.Label
 	settingsList       *fyne.Container
 	tailscaleState     tailscaleState
-	tailscaleBadgeFill *canvas.Rectangle
-	tailscaleBadgeDot  *canvas.Rectangle
-	tailscaleBadgeText *canvas.Text
-	exitNodeButton     *badgeButton
+	exitNodeButton     *splitBadgeButton
 	exitNodeMenu       *fyne.Container
 	exitNodeMenuOpen   bool
 	tailscaleBusy      bool
@@ -127,6 +124,32 @@ type badgeButtonRenderer struct {
 	objects []fyne.CanvasObject
 }
 
+type splitBadgeButton struct {
+	widget.BaseWidget
+
+	LeftText   string
+	RightText  string
+	LeftFill   color.Color
+	RightFill  color.Color
+	TextColor  color.Color
+	TextSize   float32
+	MinWidth   float32
+	Disabled   bool
+	OnTapped   func()
+}
+
+type splitBadgeButtonRenderer struct {
+	button       *splitBadgeButton
+	leftCap      *canvas.Rectangle
+	leftBody     *canvas.Rectangle
+	rightBody    *canvas.Rectangle
+	rightCap     *canvas.Rectangle
+	leftLabel    *canvas.Text
+	rightLabel   *canvas.Text
+	separator    *canvas.Line
+	objects      []fyne.CanvasObject
+}
+
 func (t textSizeTheme) Size(name fyne.ThemeSizeName) float32 {
 	switch name {
 	case theme.SizeNameText, theme.SizeNameCaptionText:
@@ -144,6 +167,21 @@ func newBadgeButton(text string, minWidth float32, onTapped func()) *badgeButton
 	button := &badgeButton{
 		Text:      text,
 		Fill:      color.NRGBA{R: 0x4A, G: 0x4B, B: 0x50, A: 0xFF},
+		TextColor: color.White,
+		TextSize:  20,
+		MinWidth:  minWidth,
+		OnTapped:  onTapped,
+	}
+	button.ExtendBaseWidget(button)
+	return button
+}
+
+func newSplitBadgeButton(leftText, rightText string, minWidth float32, onTapped func()) *splitBadgeButton {
+	button := &splitBadgeButton{
+		LeftText:  leftText,
+		RightText: rightText,
+		LeftFill:  color.NRGBA{R: 0x4A, G: 0x4B, B: 0x50, A: 0xFF},
+		RightFill: color.NRGBA{R: 0x4A, G: 0x4B, B: 0x50, A: 0xFF},
 		TextColor: color.White,
 		TextSize:  20,
 		MinWidth:  minWidth,
@@ -182,6 +220,37 @@ func (b *badgeButton) Tapped(_ *fyne.PointEvent) {
 
 func (b *badgeButton) TappedSecondary(_ *fyne.PointEvent) {}
 
+func (b *splitBadgeButton) SetTexts(leftText, rightText string) {
+	b.LeftText = leftText
+	b.RightText = rightText
+	b.Refresh()
+}
+
+func (b *splitBadgeButton) SetFills(leftFill, rightFill color.Color) {
+	b.LeftFill = leftFill
+	b.RightFill = rightFill
+	b.Refresh()
+}
+
+func (b *splitBadgeButton) Enable() {
+	b.Disabled = false
+	b.Refresh()
+}
+
+func (b *splitBadgeButton) Disable() {
+	b.Disabled = true
+	b.Refresh()
+}
+
+func (b *splitBadgeButton) Tapped(_ *fyne.PointEvent) {
+	if b.Disabled || b.OnTapped == nil {
+		return
+	}
+	b.OnTapped()
+}
+
+func (b *splitBadgeButton) TappedSecondary(_ *fyne.PointEvent) {}
+
 func (b *badgeButton) CreateRenderer() fyne.WidgetRenderer {
 	bg := canvas.NewRectangle(b.Fill)
 	bg.CornerRadius = 12
@@ -196,6 +265,43 @@ func (b *badgeButton) CreateRenderer() fyne.WidgetRenderer {
 		bg:      bg,
 		label:   label,
 		objects: []fyne.CanvasObject{bg, label},
+	}
+}
+
+func (b *splitBadgeButton) CreateRenderer() fyne.WidgetRenderer {
+	leftCap := canvas.NewRectangle(b.LeftFill)
+	leftCap.CornerRadius = 12
+
+	leftBody := canvas.NewRectangle(b.LeftFill)
+
+	rightBody := canvas.NewRectangle(b.RightFill)
+
+	rightCap := canvas.NewRectangle(b.RightFill)
+	rightCap.CornerRadius = 12
+
+	leftLabel := canvas.NewText(b.LeftText, b.TextColor)
+	leftLabel.Alignment = fyne.TextAlignCenter
+	leftLabel.TextStyle = fyne.TextStyle{Bold: true}
+	leftLabel.TextSize = b.TextSize
+
+	rightLabel := canvas.NewText(b.RightText, b.TextColor)
+	rightLabel.Alignment = fyne.TextAlignCenter
+	rightLabel.TextStyle = fyne.TextStyle{Bold: true}
+	rightLabel.TextSize = b.TextSize
+
+	separator := canvas.NewLine(color.NRGBA{R: 0x1B, G: 0x1E, B: 0x23, A: 0x66})
+	separator.StrokeWidth = 1
+
+	return &splitBadgeButtonRenderer{
+		button:     b,
+		leftCap:    leftCap,
+		leftBody:   leftBody,
+		rightBody:  rightBody,
+		rightCap:   rightCap,
+		leftLabel:  leftLabel,
+		rightLabel: rightLabel,
+		separator:  separator,
+		objects:    []fyne.CanvasObject{leftCap, leftBody, rightBody, rightCap, separator, leftLabel, rightLabel},
 	}
 }
 
@@ -244,6 +350,100 @@ func (r *badgeButtonRenderer) Objects() []fyne.CanvasObject {
 func (r *badgeButtonRenderer) Destroy() {}
 
 func (r *badgeButtonRenderer) BackgroundColor() color.Color {
+	return color.Transparent
+}
+
+func (r *splitBadgeButtonRenderer) Layout(size fyne.Size) {
+	leftWidth := size.Width / 2
+	rightWidth := size.Width - leftWidth
+	corner := float32(12)
+
+	r.leftCap.Move(fyne.NewPos(0, 0))
+	r.leftCap.Resize(fyne.NewSize(corner*2, size.Height))
+	r.leftBody.Move(fyne.NewPos(corner, 0))
+	r.leftBody.Resize(fyne.NewSize(leftWidth-corner, size.Height))
+
+	r.rightBody.Move(fyne.NewPos(leftWidth, 0))
+	r.rightBody.Resize(fyne.NewSize(rightWidth-corner, size.Height))
+	r.rightCap.Move(fyne.NewPos(size.Width-corner*2, 0))
+	r.rightCap.Resize(fyne.NewSize(corner*2, size.Height))
+
+	r.separator.Position1 = fyne.NewPos(leftWidth, 5)
+	r.separator.Position2 = fyne.NewPos(leftWidth, size.Height-5)
+
+	leftLabelSize := r.leftLabel.MinSize()
+	r.leftLabel.Move(fyne.NewPos(
+		(leftWidth-leftLabelSize.Width)/2,
+		(size.Height-leftLabelSize.Height)/2,
+	))
+	r.leftLabel.Resize(leftLabelSize)
+
+	rightLabelSize := r.rightLabel.MinSize()
+	r.rightLabel.Move(fyne.NewPos(
+		leftWidth+(rightWidth-rightLabelSize.Width)/2,
+		(size.Height-rightLabelSize.Height)/2,
+	))
+	r.rightLabel.Resize(rightLabelSize)
+}
+
+func (r *splitBadgeButtonRenderer) MinSize() fyne.Size {
+	leftWidth := canvas.NewText(r.button.LeftText, r.button.TextColor).MinSize().Width + 26
+	rightWidth := canvas.NewText(r.button.RightText, r.button.TextColor).MinSize().Width + 24
+	halfWidth := leftWidth
+	if rightWidth > halfWidth {
+		halfWidth = rightWidth
+	}
+	if halfWidth < 62 {
+		halfWidth = 62
+	}
+	width := halfWidth * 2
+	if width < r.button.MinWidth {
+		width = r.button.MinWidth
+	}
+	return fyne.NewSize(width, 38)
+}
+
+func (r *splitBadgeButtonRenderer) Refresh() {
+	leftFill := r.button.LeftFill
+	rightFill := r.button.RightFill
+	if r.button.Disabled {
+		leftFill = disabledBadgeFill(leftFill)
+		rightFill = disabledBadgeFill(rightFill)
+	}
+	r.leftCap.FillColor = leftFill
+	r.leftCap.Refresh()
+	r.leftBody.FillColor = leftFill
+	r.leftBody.Refresh()
+	r.rightBody.FillColor = rightFill
+	r.rightBody.Refresh()
+	r.rightCap.FillColor = rightFill
+	r.rightCap.Refresh()
+
+	r.leftLabel.Text = r.button.LeftText
+	r.leftLabel.Color = r.button.TextColor
+	r.rightLabel.Text = r.button.RightText
+	r.rightLabel.Color = r.button.TextColor
+	if r.button.Disabled {
+		disabledText := color.NRGBA{R: 0xE0, G: 0xE3, B: 0xE8, A: 0xD8}
+		r.leftLabel.Color = disabledText
+		r.rightLabel.Color = disabledText
+	}
+	r.leftLabel.TextSize = r.button.TextSize
+	r.rightLabel.TextSize = r.button.TextSize
+	r.leftLabel.Refresh()
+	r.rightLabel.Refresh()
+	r.separator.Refresh()
+
+	r.Layout(r.button.Size())
+}
+
+func (r *splitBadgeButtonRenderer) Objects() []fyne.CanvasObject {
+	return r.objects
+}
+
+func (r *splitBadgeButtonRenderer) Destroy() {}
+
+func (r *splitBadgeButtonRenderer) BackgroundColor() color.Color {
 	return color.Transparent
 }
 
@@ -336,19 +536,6 @@ func (a *App) buildUI() fyne.CanvasObject {
 	helpHint.Wrapping = fyne.TextWrapOff
 	helpHint.Truncation = fyne.TextTruncateClip
 
-	a.tailscaleBadgeFill = canvas.NewRectangle(color.NRGBA{R: 0x4A, G: 0x4B, B: 0x50, A: 0xFF})
-	a.tailscaleBadgeFill.SetMinSize(fyne.NewSize(116, 38))
-	a.tailscaleBadgeFill.CornerRadius = 12
-
-	a.tailscaleBadgeDot = canvas.NewRectangle(color.White)
-	a.tailscaleBadgeDot.SetMinSize(fyne.NewSize(12, 12))
-	a.tailscaleBadgeDot.CornerRadius = 6
-
-	a.tailscaleBadgeText = canvas.NewText("TS", color.White)
-	a.tailscaleBadgeText.Alignment = fyne.TextAlignCenter
-	a.tailscaleBadgeText.TextStyle = fyne.TextStyle{Bold: true}
-	a.tailscaleBadgeText.TextSize = 20
-
 	a.settingsButton = widget.NewButtonWithIcon("Settings (S)", theme.SettingsIcon(), a.showSettingsDialog)
 	a.settingsButton.Importance = widget.MediumImportance
 	a.themeButton = widget.NewButtonWithIcon("Light (T)", theme.ColorPaletteIcon(), a.toggleTheme)
@@ -358,18 +545,20 @@ func (a *App) buildUI() fyne.CanvasObject {
 	a.refreshActivity = widget.NewActivity()
 	a.refreshActivity.Hide()
 
-	a.exitNodeButton = newBadgeButton("Exit -", 132, a.toggleExitNodeMenu)
+	a.exitNodeButton = newSplitBadgeButton("TS", "Exit", 132, a.toggleExitNodeMenu)
 	a.exitNodeMenu = container.NewVBox()
 
-	header := container.NewHBox(
+	a.serverStrip = container.NewHBox(widget.NewLabel("No servers configured"))
+	serverStripScroll := container.NewHScroll(a.serverStrip)
+	serverStripScroll.SetMinSize(fyne.NewSize(260, 38))
+
+	leftGroup := container.NewHBox(
 		container.NewCenter(container.NewStack(a.badgeFill, container.NewCenter(a.badgeLabel))),
-		container.NewCenter(container.NewStack(
-			a.tailscaleBadgeFill,
-			container.NewCenter(container.NewHBox(a.tailscaleBadgeDot, a.tailscaleBadgeText)),
-		)),
 		container.NewCenter(a.exitNodeButton),
+	)
+
+	rightGroup := container.NewHBox(
 		a.updatedLabel,
-		layout.NewSpacer(),
 		a.refreshActivity,
 		helpHint,
 		a.settingsButton,
@@ -377,14 +566,20 @@ func (a *App) buildUI() fyne.CanvasObject {
 		a.refreshButton,
 	)
 
-	a.serverList = container.NewVBox(widget.NewLabel("No servers configured"))
 	a.sessionList = container.NewVBox(widget.NewLabel("No active sessions"))
 
 	content := container.NewVBox(
-		a.sectionCard("Servers", darkMode, a.serverList, false),
 		a.sectionCard("Sessions", darkMode, a.sessionList, true),
 	)
 	a.rootScroll = container.NewVScroll(content)
+
+	header := container.NewBorder(
+		nil,
+		nil,
+		leftGroup,
+		rightGroup,
+		serverStripScroll,
+	)
 
 	topBar := container.NewVBox(
 		header,
@@ -945,13 +1140,16 @@ func (a *App) render() {
 	}
 	a.renderTailscale(tsState, darkMode, exitNodeMenuOpen, tailscaleBusy)
 
-	a.renderServerList(snapshots, darkMode)
+	a.renderServerStrip(snapshots, darkMode)
 	a.renderSessionList(status.Sessions, darkMode)
 }
 
-func (a *App) renderServerList(snapshots []serverSnapshot, darkMode bool) {
-	a.serverList.Objects = serverListObjects(snapshots, darkMode)
-	a.serverList.Refresh()
+func (a *App) renderServerStrip(snapshots []serverSnapshot, darkMode bool) {
+	if a.serverStrip == nil {
+		return
+	}
+	a.serverStrip.Objects = serverStripObjects(snapshots, darkMode)
+	a.serverStrip.Refresh()
 }
 
 func (a *App) renderSessionList(sessions []SessionResponse, darkMode bool) {
@@ -1618,6 +1816,18 @@ func serverListObjects(snapshots []serverSnapshot, darkMode bool) []fyne.CanvasO
 	return objects
 }
 
+func serverStripObjects(snapshots []serverSnapshot, darkMode bool) []fyne.CanvasObject {
+	if len(snapshots) == 0 {
+		return []fyne.CanvasObject{serverStatusChip("No servers", false, darkMode)}
+	}
+
+	objects := make([]fyne.CanvasObject, 0, len(snapshots))
+	for _, snapshot := range snapshots {
+		objects = append(objects, serverStatusChip(snapshot.Server.DisplayName(), snapshot.Connected, darkMode))
+	}
+	return objects
+}
+
 func sessionListObjects(sessions []SessionResponse, darkMode bool) []fyne.CanvasObject {
 	if len(sessions) == 0 {
 		return []fyne.CanvasObject{widget.NewLabel("No active sessions")}
@@ -1814,18 +2024,8 @@ func (a *App) updateExitNode(ip, successMessage string) {
 }
 
 func (a *App) renderTailscale(state tailscaleState, darkMode bool, menuOpen bool, busy bool) {
-	fill, dot := tailscaleBadgeColors(state)
-	a.tailscaleBadgeFill.FillColor = fill
-	a.tailscaleBadgeFill.Refresh()
-	a.tailscaleBadgeDot.FillColor = dot
-	a.tailscaleBadgeDot.Refresh()
-
-	a.tailscaleBadgeText.Text = tailscaleBadgeText(state)
-	a.tailscaleBadgeText.Color = color.White
-	a.tailscaleBadgeText.Refresh()
-
-	a.exitNodeButton.SetText(exitNodeButtonLabel(state))
-	a.exitNodeButton.SetFill(exitNodeBadgeFill(state))
+	a.exitNodeButton.SetTexts("TS", exitNodeButtonLabel(state))
+	a.exitNodeButton.SetFills(tailscaleSegmentFill(state), exitNodeBadgeFill(state))
 	if busy || !state.Installed {
 		a.exitNodeButton.Disable()
 	} else {
@@ -1894,39 +2094,20 @@ func (a *App) renderTailscale(state tailscaleState, darkMode bool, menuOpen bool
 	a.exitNodeMenu.Refresh()
 }
 
-func tailscaleBadgeText(state tailscaleState) string {
-	switch {
-	case !state.Installed:
-		return "TS -"
-	case state.Online:
-		return "TS on"
-	default:
-		return "TS off"
-	}
-}
-
-func tailscaleBadgeColors(state tailscaleState) (color.Color, color.Color) {
+func tailscaleSegmentFill(state tailscaleState) color.Color {
 	switch {
 	case state.Online:
-		return color.NRGBA{R: 0x1E, G: 0x5E, B: 0x46, A: 0xFF}, color.NRGBA{R: 0x82, G: 0xF2, B: 0xA7, A: 0xFF}
-	case state.Installed:
-		return color.NRGBA{R: 0x4A, G: 0x4B, B: 0x50, A: 0xFF}, color.NRGBA{R: 0xD0, G: 0xD3, B: 0xDA, A: 0xFF}
+		return color.NRGBA{R: 0x2D, G: 0x7A, B: 0x52, A: 0xFF}
 	default:
-		return color.NRGBA{R: 0x34, G: 0x35, B: 0x39, A: 0xFF}, color.NRGBA{R: 0x75, G: 0x78, B: 0x80, A: 0xFF}
+		return color.NRGBA{R: 0x4A, G: 0x4B, B: 0x50, A: 0xFF}
 	}
 }
 
 func exitNodeButtonLabel(state tailscaleState) string {
-	if !state.Installed {
-		return "Exit -"
-	}
-	if name := compactExitNodeName(state.ExitNodeName); name != "" {
-		return "Exit " + name
-	}
 	if state.Error != "" {
 		return "Exit !"
 	}
-	return "Exit off"
+	return "Exit"
 }
 
 func exitNodeBadgeFill(state tailscaleState) color.Color {
@@ -1936,7 +2117,7 @@ func exitNodeBadgeFill(state tailscaleState) color.Color {
 	case state.Error != "":
 		return color.NRGBA{R: 0x8A, G: 0x61, B: 0x18, A: 0xFF}
 	case state.ExitNodeName != "":
-		return color.NRGBA{R: 0x1F, G: 0x5F, B: 0x8F, A: 0xFF}
+		return color.NRGBA{R: 0x2D, G: 0x7A, B: 0x52, A: 0xFF}
 	default:
 		return color.NRGBA{R: 0x4A, G: 0x4B, B: 0x50, A: 0xFF}
 	}
@@ -2065,6 +2246,32 @@ func connectivityBadge(connected bool) fyne.CanvasObject {
 	return container.NewStack(bg, container.NewCenter(text))
 }
 
+func serverStatusChip(name string, connected bool, darkMode bool) fyne.CanvasObject {
+	label := valueOrDash(name)
+	textColor := color.Color(color.White)
+	if !connected {
+		textColor = offlineServerText(darkMode)
+	}
+
+	text := canvas.NewText(label, textColor)
+	text.Alignment = fyne.TextAlignCenter
+	text.TextStyle = fyne.TextStyle{Bold: true}
+	text.TextSize = 22
+
+	paddingWidth := float32(28)
+	minWidth := float32(112)
+	width := text.MinSize().Width + paddingWidth
+	if width < minWidth {
+		width = minWidth
+	}
+
+	bg := canvas.NewRectangle(serverStatusFill(connected))
+	bg.SetMinSize(fyne.NewSize(width, 38))
+	bg.CornerRadius = 10
+
+	return container.NewStack(bg, container.NewCenter(text))
+}
+
 func sourceBadge(name string, darkMode bool) fyne.CanvasObject {
 	label := valueOrDash(name)
 
@@ -2106,6 +2313,20 @@ func sourceBadgeFill(darkMode bool) color.NRGBA {
 		return color.NRGBA{R: 0x5A, G: 0x45, B: 0x2A, A: 0xFF}
 	}
 	return color.NRGBA{R: 0xA3, G: 0x73, B: 0x2D, A: 0xFF}
+}
+
+func serverStatusFill(connected bool) color.NRGBA {
+	if connected {
+		return color.NRGBA{R: 0x2D, G: 0x7A, B: 0x52, A: 0xFF}
+	}
+	return color.NRGBA{R: 0x4A, G: 0x4B, B: 0x50, A: 0xFF}
+}
+
+func offlineServerText(darkMode bool) color.Color {
+	if darkMode {
+		return color.NRGBA{R: 0xCF, G: 0xD4, B: 0xDB, A: 0xFF}
+	}
+	return color.NRGBA{R: 0xE5, G: 0xE7, B: 0xEB, A: 0xFF}
 }
 
 func serverUpdatedTime(snapshot serverSnapshot) time.Time {
