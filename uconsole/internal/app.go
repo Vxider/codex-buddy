@@ -105,6 +105,8 @@ type forcedVariant struct {
 	variant fyne.ThemeVariant
 }
 
+var headerControlHeight float32 = 38
+
 type badgeButton struct {
 	widget.BaseWidget
 
@@ -322,7 +324,7 @@ func (r *badgeButtonRenderer) MinSize() fyne.Size {
 	if labelWidth > width {
 		width = labelWidth
 	}
-	return fyne.NewSize(width, 38)
+	return fyne.NewSize(width, headerControlHeight)
 }
 
 func (r *badgeButtonRenderer) Refresh() {
@@ -400,7 +402,7 @@ func (r *splitBadgeButtonRenderer) MinSize() fyne.Size {
 	if width < r.button.MinWidth {
 		width = r.button.MinWidth
 	}
-	return fyne.NewSize(width, 38)
+	return fyne.NewSize(width, headerControlHeight)
 }
 
 func (r *splitBadgeButtonRenderer) Refresh() {
@@ -520,10 +522,6 @@ func (a *App) buildUI() fyne.CanvasObject {
 	a.cardFills = nil
 	a.cardBorders = nil
 
-	a.badgeFill = canvas.NewRectangle(color.NRGBA{R: 0x4A, G: 0x4B, B: 0x50, A: 0xFF})
-	a.badgeFill.SetMinSize(fyne.NewSize(148, 38))
-	a.badgeFill.CornerRadius = 12
-
 	a.badgeLabel = canvas.NewText("OFFLINE", color.White)
 	a.badgeLabel.Alignment = fyne.TextAlignCenter
 	a.badgeLabel.TextStyle = fyne.TextStyle{Bold: true}
@@ -545,12 +543,21 @@ func (a *App) buildUI() fyne.CanvasObject {
 	a.refreshActivity = widget.NewActivity()
 	a.refreshActivity.Hide()
 
+	headerControlHeight = a.settingsButton.MinSize().Height
+	if headerControlHeight < 38 {
+		headerControlHeight = 38
+	}
+
+	a.badgeFill = canvas.NewRectangle(color.NRGBA{R: 0x4A, G: 0x4B, B: 0x50, A: 0xFF})
+	a.badgeFill.SetMinSize(fyne.NewSize(148, headerControlHeight))
+	a.badgeFill.CornerRadius = 12
+
 	a.exitNodeButton = newSplitBadgeButton("TS", "Exit", 132, a.toggleExitNodeMenu)
 	a.exitNodeMenu = container.NewVBox()
 
 	a.serverStrip = container.NewHBox(widget.NewLabel("No servers configured"))
 	serverStripScroll := container.NewHScroll(a.serverStrip)
-	serverStripScroll.SetMinSize(fyne.NewSize(260, 38))
+	serverStripScroll.SetMinSize(fyne.NewSize(260, headerControlHeight))
 
 	leftGroup := container.NewHBox(
 		container.NewCenter(container.NewStack(a.badgeFill, container.NewCenter(a.badgeLabel))),
@@ -2270,7 +2277,7 @@ func serverStatusChip(name string, connected bool, darkMode bool) fyne.CanvasObj
 	}
 
 	bg := canvas.NewRectangle(serverStatusFill(connected))
-	bg.SetMinSize(fyne.NewSize(width, 38))
+	bg.SetMinSize(fyne.NewSize(width, headerControlHeight))
 	bg.CornerRadius = 10
 
 	return container.NewStack(bg, container.NewCenter(text))
