@@ -15,22 +15,26 @@ type StatusResponse struct {
 }
 
 type SessionResponse struct {
-	SessionID        string                 `json:"session_id"`
-	ShortSessionID   string                 `json:"short_session_id,omitempty"`
-	DisplayTitle     string                 `json:"display_title,omitempty"`
-	State            model.State            `json:"state"`
-	StateDetail      string                 `json:"state_detail,omitempty"`
-	UpdatedAt        time.Time              `json:"updated_at,omitempty"`
-	Summary          string                 `json:"summary,omitempty"`
-	NeedsOpen        bool                   `json:"needs_open,omitempty"`
-	NeedsApproval    bool                   `json:"needs_approval,omitempty"`
-	OpenReason       string                 `json:"open_reason,omitempty"`
-	OpenSummary      string                 `json:"open_summary,omitempty"`
-	CanContinue      bool                   `json:"can_continue,omitempty"`
-	ContinueAction   *ContinueActionPayload `json:"continue_action,omitempty"`
-	ServerID         string                 `json:"-"`
-	ServerName       string                 `json:"-"`
-	ServerURL        string                 `json:"-"`
+	SessionID           string                 `json:"session_id"`
+	ShortSessionID      string                 `json:"short_session_id,omitempty"`
+	DisplayTitle        string                 `json:"display_title,omitempty"`
+	State               model.State            `json:"state"`
+	StateDetail         string                 `json:"state_detail,omitempty"`
+	UpdatedAt           time.Time              `json:"updated_at,omitempty"`
+	Summary             string                 `json:"summary,omitempty"`
+	SummaryMarkdown     string                 `json:"summary_markdown,omitempty"`
+	SummaryHTML         string                 `json:"summary_html,omitempty"`
+	NeedsOpen           bool                   `json:"needs_open,omitempty"`
+	NeedsApproval       bool                   `json:"needs_approval,omitempty"`
+	OpenReason          string                 `json:"open_reason,omitempty"`
+	OpenSummary         string                 `json:"open_summary,omitempty"`
+	OpenSummaryMarkdown string                 `json:"open_summary_markdown,omitempty"`
+	OpenSummaryHTML     string                 `json:"open_summary_html,omitempty"`
+	CanContinue         bool                   `json:"can_continue,omitempty"`
+	ContinueAction      *ContinueActionPayload `json:"continue_action,omitempty"`
+	ServerID            string                 `json:"-"`
+	ServerName          string                 `json:"-"`
+	ServerURL           string                 `json:"-"`
 }
 
 type ContinueActionPayload struct {

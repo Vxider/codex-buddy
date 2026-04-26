@@ -5,6 +5,7 @@ package uconsole
 import (
 	"context"
 	"fmt"
+	stdhtml "html"
 	"image/color"
 	"log"
 	"math/rand"
@@ -12,6 +13,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode"
 
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/app"
@@ -22,6 +24,7 @@ import (
 	"fyne.io/fyne/v2/layout"
 	"fyne.io/fyne/v2/theme"
 	"fyne.io/fyne/v2/widget"
+	xhtml "golang.org/x/net/html"
 
 	"github.com/vxider/codex-buddy/internal/config"
 	"github.com/vxider/codex-buddy/internal/model"
@@ -172,6 +175,28 @@ type sessionListState struct {
 	holdLabel      string
 }
 
+type sessionGridLayout struct {
+	minColumnWidth float32
+	gap            float32
+}
+
+type markdownSpan struct {
+	Text  string
+	Style widget.RichTextStyle
+}
+
+type markdownParagraph struct {
+	widget.BaseWidget
+	spans []markdownSpan
+}
+
+type markdownParagraphFragment struct {
+	Text  string
+	Style widget.RichTextStyle
+	X     float32
+	Y     float32
+}
+
 var openShortcutPool = []fyne.KeyName{
 	fyne.KeyB,
 	fyne.KeyD,
@@ -202,6 +227,540 @@ func (t textSizeTheme) Size(name fyne.ThemeSizeName) float32 {
 
 func (f forcedVariant) Color(name fyne.ThemeColorName, _ fyne.ThemeVariant) color.Color {
 	return f.Theme.Color(name, f.variant)
+}
+
+func (l sessionGridLayout) Layout(objects []fyne.CanvasObject, size fyne.Size) {
+	visible := visibleObjects(objects)
+	if len(visible) == 0 {
+		return
+	}
+
+	cols := l.columns(size.Width, len(visible))
+	gap := l.spacing()
+	cellWidth := size.Width
+	if cols > 1 {
+		cellWidth = (size.Width - gap) / float32(cols)
+	}
+	if cellWidth < 0 {
+		cellWidth = 0
+	}
+
+	x := float32(0)
+	y := float32(0)
+	rowHeight := float32(0)
+	col := 0
+
+	for _, obj := range visible {
+		objHeight := obj.MinSize().Height
+		obj.Move(fyne.NewPos(x, y))
+		obj.Resize(fyne.NewSize(cellWidth, objHeight))
+		if objHeight > rowHeight {
+			rowHeight = objHeight
+		}
+
+		col++
+		if col >= cols {
+			col = 0
+			x = 0
+			y += rowHeight + gap
+			rowHeight = 0
+			continue
+		}
+		x += cellWidth + gap
+	}
+}
+
+func (l sessionGridLayout) MinSize(objects []fyne.CanvasObject) fyne.Size {
+	visible := visibleObjects(objects)
+	if len(visible) == 0 {
+		return fyne.NewSize(0, 0)
+	}
+
+	width := float32(0)
+	height := float32(0)
+	gap := l.spacing()
+	for i, obj := range visible {
+		min := obj.MinSize()
+		if min.Width > width {
+			width = min.Width
+		}
+		height += min.Height
+		if i > 0 {
+			height += gap
+		}
+	}
+	return fyne.NewSize(width, height)
+}
+
+func (l sessionGridLayout) columns(width float32, count int) int {
+	if count < 2 {
+		return 1
+	}
+	gap := l.spacing()
+	minWidth := l.minWidth()
+	if width >= minWidth*2+gap {
+		return 2
+	}
+	return 1
+}
+
+func (l sessionGridLayout) minWidth() float32 {
+	if l.minColumnWidth > 0 {
+		return l.minColumnWidth
+	}
+	return 520
+}
+
+func (l sessionGridLayout) spacing() float32 {
+	if l.gap > 0 {
+		return l.gap
+	}
+	return theme.Padding()
+}
+
+func visibleObjects(objects []fyne.CanvasObject) []fyne.CanvasObject {
+	visible := make([]fyne.CanvasObject, 0, len(objects))
+	for _, obj := range objects {
+		if obj != nil && obj.Visible() {
+			visible = append(visible, obj)
+		}
+	}
+	return visible
+}
+
+func newMarkdownParagraph(spans []markdownSpan) *markdownParagraph {
+	paragraph := &markdownParagraph{spans: compactMarkdownSpans(spans)}
+	paragraph.ExtendBaseWidget(paragraph)
+	return paragraph
+}
+
+func compactMarkdownSpans(spans []markdownSpan) []markdownSpan {
+	if len(spans) < 2 {
+		return spans
+	}
+
+	merged := make([]markdownSpan, 0, len(spans))
+	for _, span := range spans {
+		if span.Text == "" {
+			continue
+		}
+		lastIndex := len(merged) - 1
+		if lastIndex >= 0 && merged[lastIndex].Style == span.Style {
+			merged[lastIndex].Text += span.Text
+			continue
+		}
+		merged = append(merged, span)
+	}
+	return merged
+}
+
+func (p *markdownParagraph) CreateRenderer() fyne.WidgetRenderer {
+	return &markdownParagraphRenderer{paragraph: p}
+}
+
+type markdownParagraphRenderer struct {
+	paragraph *markdownParagraph
+	fragments []markdownParagraphFragment
+	objects   []fyne.CanvasObject
+	width     float32
+	height    float32
+}
+
+func (r *markdownParagraphRenderer) Layout(size fyne.Size) {
+	width := size.Width
+	if width <= 0 {
+		width = markdownParagraphLayoutWidth(0)
+	}
+	r.ensureLayout(width)
+
+	for i, object := range r.objects {
+		if i >= len(r.fragments) {
+			object.Hide()
+			continue
+		}
+		text := object.(*canvas.Text)
+		fragment := r.fragments[i]
+		text.Text = fragment.Text
+		text.Color = markdownTextColor(fragment.Style)
+		text.TextStyle = fragment.Style.TextStyle
+		text.TextSize = markdownTextSize(fragment.Style)
+		text.Move(fyne.NewPos(fragment.X, fragment.Y))
+		text.Resize(text.MinSize())
+		text.Show()
+		text.Refresh()
+	}
+}
+
+func (r *markdownParagraphRenderer) MinSize() fyne.Size {
+	width := markdownParagraphLayoutWidth(r.paragraph.Size().Width)
+	r.ensureLayout(width)
+	return fyne.NewSize(width, r.height)
+}
+
+func (r *markdownParagraphRenderer) Refresh() {
+	r.width = 0
+	r.ensureLayout(r.paragraph.Size().Width)
+	for _, object := range r.objects {
+		object.Refresh()
+	}
+}
+
+func (r *markdownParagraphRenderer) Objects() []fyne.CanvasObject {
+	r.ensureLayout(r.paragraph.Size().Width)
+	return r.objects
+}
+
+func (r *markdownParagraphRenderer) Destroy() {}
+
+func (r *markdownParagraphRenderer) ensureLayout(width float32) {
+	width = markdownParagraphLayoutWidth(width)
+	if r.width == width {
+		return
+	}
+
+	fragments, height := layoutMarkdownParagraph(r.paragraph.spans, width)
+	r.fragments = fragments
+	r.height = height
+	r.width = width
+
+	r.objects = make([]fyne.CanvasObject, 0, len(fragments))
+	for _, fragment := range fragments {
+		text := canvas.NewText(fragment.Text, markdownTextColor(fragment.Style))
+		text.TextStyle = fragment.Style.TextStyle
+		text.TextSize = markdownTextSize(fragment.Style)
+		r.objects = append(r.objects, text)
+	}
+}
+
+const markdownParagraphDefaultWidth float32 = 360
+
+func markdownParagraphLayoutWidth(width float32) float32 {
+	if width > 0 {
+		return width
+	}
+
+	app := fyne.CurrentApp()
+	if app != nil && app.Driver() != nil {
+		for _, window := range app.Driver().AllWindows() {
+			if window == nil || window.Canvas() == nil {
+				continue
+			}
+			canvasSize := window.Canvas().Size()
+			if canvasSize.Width <= 0 {
+				continue
+			}
+
+			// Summary paragraphs live inside padded cards; reserve room for card chrome.
+			hinted := canvasSize.Width - 96
+			if hinted > markdownParagraphDefaultWidth {
+				return hinted
+			}
+		}
+	}
+
+	return markdownParagraphDefaultWidth
+}
+
+func layoutMarkdownParagraph(spans []markdownSpan, width float32) ([]markdownParagraphFragment, float32) {
+	width = markdownParagraphLayoutWidth(width)
+
+	tokens := markdownTokens(spans)
+	if len(tokens) == 0 {
+		return nil, markdownLineHeight(widget.RichTextStyleInline)
+	}
+
+	lineSpacing := fyne.CurrentApp().Settings().Theme().Size(theme.SizeNameLineSpacing)
+	fragments := make([]markdownParagraphFragment, 0, len(tokens))
+	x := float32(0)
+	y := float32(0)
+	rowHeight := float32(0)
+
+	newLine := func() {
+		trimTrailingLineWhitespace(&fragments, y, &x)
+		if rowHeight <= 0 {
+			rowHeight = markdownLineHeight(widget.RichTextStyleInline)
+		}
+		x = 0
+		y += rowHeight + lineSpacing
+		rowHeight = 0
+	}
+
+	appendFragment := func(text string, style widget.RichTextStyle) {
+		if text == "" {
+			return
+		}
+		size := fyne.MeasureText(text, markdownTextSize(style), style.TextStyle)
+		rowHeight = maxFloat32(rowHeight, size.Height)
+		lastIndex := len(fragments) - 1
+		if lastIndex >= 0 {
+			last := &fragments[lastIndex]
+			if last.Style == style && last.Y == y && last.X+fyne.MeasureText(last.Text, markdownTextSize(style), style.TextStyle).Width == x {
+				last.Text += text
+				x += size.Width
+				return
+			}
+		}
+		fragments = append(fragments, markdownParagraphFragment{
+			Text:  text,
+			Style: style,
+			X:     x,
+			Y:     y,
+		})
+		x += size.Width
+	}
+
+	for _, token := range tokens {
+		if token.Text == "\n" {
+			newLine()
+			continue
+		}
+
+		text := token.Text
+		style := token.Style
+		for text != "" {
+			if x == 0 && strings.TrimSpace(text) == "" {
+				break
+			}
+
+			size := fyne.MeasureText(text, markdownTextSize(style), style.TextStyle)
+			if size.Width <= width-x {
+				appendFragment(text, style)
+				break
+			}
+
+			if x > 0 && shouldMoveMarkdownTokenToNextLine(text, style, width-x, width) {
+				newLine()
+				continue
+			}
+
+			part, rest := splitMarkdownToken(text, style, width-x)
+			if part != "" {
+				appendFragment(part, style)
+				text = rest
+				if text != "" {
+					newLine()
+				}
+				continue
+			}
+
+			if x > 0 {
+				if trimTrailingLineWhitespace(&fragments, y, &x) {
+					continue
+				}
+				newLine()
+				continue
+			}
+
+			if part == "" {
+				runes := []rune(text)
+				part = string(runes[:1])
+				rest = string(runes[1:])
+			}
+			appendFragment(part, style)
+			text = rest
+			if text != "" {
+				newLine()
+			}
+		}
+	}
+
+	if rowHeight <= 0 {
+		rowHeight = markdownLineHeight(widget.RichTextStyleInline)
+	}
+	return fragments, y + rowHeight
+}
+
+func trimTrailingLineWhitespace(fragments *[]markdownParagraphFragment, lineY float32, x *float32) bool {
+	items := *fragments
+	for i := len(items) - 1; i >= 0; i-- {
+		fragment := items[i]
+		if fragment.Y != lineY {
+			break
+		}
+
+		trimmed := strings.TrimRightFunc(fragment.Text, unicode.IsSpace)
+		if trimmed == fragment.Text {
+			return false
+		}
+
+		if trimmed == "" {
+			items = items[:i]
+			*fragments = items
+			*x = fragment.X
+			return true
+		}
+
+		fragment.Text = trimmed
+		items[i] = fragment
+		*fragments = items
+		*x = fragment.X + fyne.MeasureText(trimmed, markdownTextSize(fragment.Style), fragment.Style.TextStyle).Width
+		return true
+	}
+	return false
+}
+
+func shouldMoveMarkdownTokenToNextLine(text string, style widget.RichTextStyle, remainingWidth float32, lineWidth float32) bool {
+	if strings.TrimSpace(text) == "" || strings.Contains(text, "\n") {
+		return false
+	}
+
+	fullWidth := fyne.MeasureText(text, markdownTextSize(style), style.TextStyle).Width
+	if fullWidth <= remainingWidth {
+		return false
+	}
+	if fullWidth > lineWidth {
+		return false
+	}
+
+	if isInlineAccentStyle(style) {
+		if isMarkdownPathLikeToken(text) && fullWidth > lineWidth*0.45 {
+			return false
+		}
+		return true
+	}
+	return isMarkdownPlainWordToken(text) && fullWidth <= lineWidth*0.22
+}
+
+func isMarkdownPlainWordToken(text string) bool {
+	runes := []rune(text)
+	if len(runes) == 0 {
+		return false
+	}
+	for _, r := range runes {
+		if unicode.IsSpace(r) {
+			return false
+		}
+		if r >= 0x80 {
+			return false
+		}
+	}
+	for _, r := range runes {
+		if !(unicode.IsLetter(r) || unicode.IsDigit(r) || r == '\'' || r == '-') {
+			return false
+		}
+	}
+	return true
+}
+
+func isMarkdownPathLikeToken(text string) bool {
+	return strings.ContainsAny(text, "/._:")
+}
+
+func markdownTokens(spans []markdownSpan) []markdownSpan {
+	tokens := make([]markdownSpan, 0, len(spans)*4)
+	for _, span := range spans {
+		for _, token := range splitMarkdownText(span.Text) {
+			tokens = append(tokens, markdownSpan{Text: token, Style: span.Style})
+		}
+	}
+	return tokens
+}
+
+func splitMarkdownText(text string) []string {
+	tokens := make([]string, 0, len(text))
+	runes := []rune(text)
+	for i := 0; i < len(runes); {
+		r := runes[i]
+		switch {
+		case r == '\n':
+			tokens = append(tokens, "\n")
+			i++
+		case unicode.IsSpace(r):
+			start := i
+			for i < len(runes) && unicode.IsSpace(runes[i]) && runes[i] != '\n' {
+				i++
+			}
+			tokens = append(tokens, string(runes[start:i]))
+		case r < 0x80:
+			start := i
+			for i < len(runes) && runes[i] < 0x80 && !unicode.IsSpace(runes[i]) {
+				i++
+			}
+			tokens = append(tokens, string(runes[start:i]))
+		default:
+			tokens = append(tokens, string(r))
+			i++
+		}
+	}
+	return tokens
+}
+
+func splitMarkdownToken(text string, style widget.RichTextStyle, width float32) (string, string) {
+	if width <= 0 {
+		return "", text
+	}
+
+	runes := []rune(text)
+	if len(runes) <= 1 {
+		return "", text
+	}
+
+	lastFit := 0
+	for i := 1; i <= len(runes); i++ {
+		part := string(runes[:i])
+		if fyne.MeasureText(part, markdownTextSize(style), style.TextStyle).Width <= width {
+			lastFit = i
+			continue
+		}
+		break
+	}
+	if lastFit == 0 {
+		return "", text
+	}
+	if preferred := preferredMarkdownBreakIndex(runes[:lastFit]); preferred > 0 && preferred < lastFit {
+		lastFit = preferred
+	}
+	return string(runes[:lastFit]), string(runes[lastFit:])
+}
+
+func preferredMarkdownBreakIndex(runes []rune) int {
+	if len(runes) < 2 {
+		return 0
+	}
+
+	for i := len(runes) - 1; i > 0; i-- {
+		if isMarkdownBreakRune(runes[i-1]) {
+			return i
+		}
+	}
+	return 0
+}
+
+func isMarkdownBreakRune(r rune) bool {
+	switch r {
+	case '/', '.', '_', '-', ':', ')', ']', ',':
+		return true
+	default:
+		return false
+	}
+}
+
+func markdownTextSize(style widget.RichTextStyle) float32 {
+	name := style.SizeName
+	if name == "" {
+		name = theme.SizeNameText
+	}
+	return fyne.CurrentApp().Settings().Theme().Size(name)
+}
+
+func markdownTextColor(style widget.RichTextStyle) color.Color {
+	name := style.ColorName
+	if name == "" {
+		name = theme.ColorNameForeground
+	}
+	variant := fyne.CurrentApp().Settings().ThemeVariant()
+	return fyne.CurrentApp().Settings().Theme().Color(name, variant)
+}
+
+func markdownLineHeight(style widget.RichTextStyle) float32 {
+	return fyne.MeasureText("Mg", markdownTextSize(style), style.TextStyle).Height
+}
+
+func maxFloat32(a, b float32) float32 {
+	if a > b {
+		return a
+	}
+	return b
 }
 
 func newBadgeButton(text string, minWidth float32, onTapped func()) *badgeButton {
@@ -620,7 +1179,7 @@ func (a *App) buildUI() fyne.CanvasObject {
 	a.openSessionSection = container.NewVBox(
 		a.sectionCard("Open Sessions", darkMode, a.openSessionList, &a.openSessionCardBorder),
 	)
-	a.sessionList = container.NewVBox(widget.NewLabel("No active sessions"))
+	a.sessionList = container.New(&sessionGridLayout{minColumnWidth: 520})
 
 	content := container.NewVBox(
 		a.openSessionSection,
@@ -2213,17 +2772,8 @@ func sessionListObjects(sessions []SessionResponse, hasOpenSessions bool, darkMo
 	}
 
 	objects := make([]fyne.CanvasObject, 0, len(sessions))
-	for i := 0; i < len(sessions); i += 2 {
-		left := sessionCell(sessions[i], darkMode)
-		right := fyne.CanvasObject(layout.NewSpacer())
-		if i+1 < len(sessions) {
-			right = sessionCell(sessions[i+1], darkMode)
-		}
-
-		objects = append(objects, container.NewGridWithColumns(2, left, right))
-		if i+2 < len(sessions) {
-			objects = append(objects, widget.NewSeparator())
-		}
+	for _, session := range sessions {
+		objects = append(objects, sessionCell(session, darkMode))
 	}
 	return objects
 }
@@ -2245,8 +2795,7 @@ func openSessionRow(session SessionResponse, darkMode bool, state sessionListSta
 
 	header := container.NewBorder(nil, nil, nil, badges, title)
 
-	summaryText := firstNonEmptyText(session.OpenSummary, session.Summary)
-	summary := markdownText(firstNonEmptyText(summaryText, "Waiting for approval"))
+	summary := sessionSummaryObject(session, darkMode, "Waiting for approval")
 
 	hintText := "No shortcut available"
 	switch {
@@ -2654,8 +3203,8 @@ func sessionRow(session SessionResponse, darkMode bool) fyne.CanvasObject {
 	)
 
 	var middle fyne.CanvasObject = layout.NewSpacer()
-	if summary := firstNonEmptyText(session.OpenSummary, session.Summary); summary != "" {
-		middle = markdownText(summary)
+	if summary := sessionSummaryObject(session, darkMode, ""); summary != nil {
+		middle = summary
 	}
 	return container.NewBorder(
 		header,
@@ -2759,69 +3308,595 @@ func metaText(value string, darkMode bool) fyne.CanvasObject {
 	return text
 }
 
-func markdownText(value string) fyne.CanvasObject {
+func markdownText(value string, darkMode bool) fyne.CanvasObject {
 	rich := widget.NewRichTextFromMarkdown(spacedMarkdown(value))
-	rich.Wrapping = fyne.TextWrapWord
-	styleMarkdownSegments(rich.Segments)
-	return rich
+	objects := spacedMarkdownObjects(markdownObjects(rich.Segments, darkMode))
+	if len(objects) == 0 {
+		return layout.NewSpacer()
+	}
+	if len(objects) == 1 {
+		return objects[0]
+	}
+	return container.NewVBox(objects...)
 }
 
-func styleMarkdownSegments(segments []widget.RichTextSegment) {
-	for i, segment := range segments {
+func sessionSummaryObject(session SessionResponse, darkMode bool, fallback string) fyne.CanvasObject {
+	if htmlValue := firstNonEmptyText(session.OpenSummaryHTML, session.SummaryHTML); htmlValue != "" {
+		if objects := spacedMarkdownObjects(htmlSummaryObjects(htmlValue, darkMode)); len(objects) > 0 {
+			if len(objects) == 1 {
+				return objects[0]
+			}
+			return container.NewVBox(objects...)
+		}
+	}
+
+	markdownValue := firstNonEmptyText(
+		session.OpenSummaryMarkdown,
+		session.OpenSummary,
+		session.SummaryMarkdown,
+		session.Summary,
+		fallback,
+	)
+	if markdownValue == "" {
+		return nil
+	}
+	return markdownText(markdownValue, darkMode)
+}
+
+func spacedMarkdownObjects(objects []fyne.CanvasObject) []fyne.CanvasObject {
+	if len(objects) < 2 {
+		return objects
+	}
+
+	spaced := make([]fyne.CanvasObject, 0, len(objects)*2-1)
+	for i, object := range objects {
+		if i > 0 {
+			gap := canvas.NewRectangle(color.Transparent)
+			gap.SetMinSize(fyne.NewSize(1, markdownLineHeight(widget.RichTextStyleInline)))
+			spaced = append(spaced, gap)
+		}
+		spaced = append(spaced, object)
+	}
+	return spaced
+}
+
+func htmlSummaryObjects(value string, darkMode bool) []fyne.CanvasObject {
+	document, err := xhtml.Parse(strings.NewReader("<!doctype html><html><body>" + value + "</body></html>"))
+	if err != nil {
+		return nil
+	}
+	body := findHTMLBodyNode(document)
+	if body == nil {
+		return nil
+	}
+
+	objects := make([]fyne.CanvasObject, 0, 8)
+	for node := body.FirstChild; node != nil; node = node.NextSibling {
+		objects = append(objects, htmlSummaryNodeObjects(node, darkMode)...)
+	}
+	return objects
+}
+
+func findHTMLBodyNode(node *xhtml.Node) *xhtml.Node {
+	if node == nil {
+		return nil
+	}
+	if node.Type == xhtml.ElementNode && node.Data == "body" {
+		return node
+	}
+	for child := node.FirstChild; child != nil; child = child.NextSibling {
+		if found := findHTMLBodyNode(child); found != nil {
+			return found
+		}
+	}
+	return nil
+}
+
+func htmlSummaryNodeObjects(node *xhtml.Node, darkMode bool) []fyne.CanvasObject {
+	switch node.Type {
+	case xhtml.TextNode:
+		text := normalizeHTMLText(node.Data)
+		if strings.TrimSpace(text) == "" {
+			return nil
+		}
+		return []fyne.CanvasObject{newMarkdownParagraph([]markdownSpan{{
+			Text:  text,
+			Style: widget.RichTextStyleInline,
+		}})}
+	case xhtml.ElementNode:
+		switch node.Data {
+		case "p":
+			return htmlParagraphObjects(node, darkMode, "")
+		case "pre":
+			text := strings.Trim(htmlNodePlainText(node), "\n")
+			if text == "" {
+				return nil
+			}
+			return []fyne.CanvasObject{newMarkdownCodeBlockObject(text, darkMode)}
+		case "ul":
+			return htmlListObjects(node, false, darkMode)
+		case "ol":
+			return htmlListObjects(node, true, darkMode)
+		case "hr":
+			return []fyne.CanvasObject{widget.NewSeparator()}
+		default:
+			objects := make([]fyne.CanvasObject, 0, 4)
+			for child := node.FirstChild; child != nil; child = child.NextSibling {
+				objects = append(objects, htmlSummaryNodeObjects(child, darkMode)...)
+			}
+			return objects
+		}
+	default:
+		return nil
+	}
+}
+
+func htmlListObjects(node *xhtml.Node, ordered bool, darkMode bool) []fyne.CanvasObject {
+	objects := make([]fyne.CanvasObject, 0, 4)
+	index := 1
+	for child := node.FirstChild; child != nil; child = child.NextSibling {
+		if child.Type != xhtml.ElementNode || child.Data != "li" {
+			continue
+		}
+
+		prefix := "\u2022 "
+		if ordered {
+			prefix = fmt.Sprintf("%d. ", index)
+		}
+		objects = append(objects, htmlParagraphObjects(child, darkMode, prefix)...)
+		index++
+	}
+	return objects
+}
+
+func htmlParagraphObjects(node *xhtml.Node, darkMode bool, prefix string) []fyne.CanvasObject {
+	lines := htmlParagraphLines(node, prefix)
+	if len(lines) == 0 {
+		return nil
+	}
+
+	if len(lines) > 1 {
+		switch {
+		case markdownLinesAllCodeOnly(lines):
+			return []fyne.CanvasObject{newMarkdownCodeBlockObject(markdownCodeLinesText(lines), darkMode)}
+		case !markdownLineIsCodeOnly(lines[0]) && markdownLinesAllCodeOnly(lines[1:]):
+			objects := []fyne.CanvasObject{newMarkdownParagraph(markdownJoinLines(lines[:1]))}
+			objects = append(objects, newMarkdownCodeBlockObject(markdownCodeLinesText(lines[1:]), darkMode))
+			return objects
+		}
+	}
+
+	return []fyne.CanvasObject{newMarkdownParagraph(markdownJoinLines(lines))}
+}
+
+func htmlParagraphLines(node *xhtml.Node, prefix string) [][]markdownSpan {
+	lines := [][]markdownSpan{{}}
+	if prefix != "" {
+		lines[0] = append(lines[0], markdownSpan{Text: prefix, Style: widget.RichTextStyleInline})
+	}
+	htmlAppendInlineNode(&lines, node, widget.RichTextStyleInline)
+	return normalizeMarkdownLines(lines)
+}
+
+func htmlAppendInlineNode(lines *[][]markdownSpan, node *xhtml.Node, style widget.RichTextStyle) {
+	switch node.Type {
+	case xhtml.TextNode:
+		text := normalizeHTMLText(node.Data)
+		if text == "" {
+			return
+		}
+		htmlAppendLineSpan(lines, markdownSpan{Text: text, Style: style})
+	case xhtml.ElementNode:
+		switch node.Data {
+		case "br":
+			*lines = append(*lines, nil)
+			return
+		case "code":
+			htmlAppendLineSpan(lines, markdownSpan{
+				Text:  htmlNodePlainText(node),
+				Style: mergedMarkdownStyle(style, markdownCodeInlineStyle()),
+			})
+			return
+		case "a":
+			linkStyle := mergedMarkdownStyle(style, markdownLinkStyle())
+			for child := node.FirstChild; child != nil; child = child.NextSibling {
+				htmlAppendInlineNode(lines, child, linkStyle)
+			}
+			return
+		case "strong", "b":
+			style = mergedMarkdownStyle(style, widget.RichTextStyle{
+				Inline:    true,
+				SizeName:  theme.SizeNameText,
+				TextStyle: fyne.TextStyle{Bold: true},
+			})
+		case "em", "i":
+			style = mergedMarkdownStyle(style, widget.RichTextStyle{
+				Inline:    true,
+				SizeName:  theme.SizeNameText,
+				TextStyle: fyne.TextStyle{Italic: true},
+			})
+		case "p", "li", "span":
+		default:
+		}
+	}
+
+	for child := node.FirstChild; child != nil; child = child.NextSibling {
+		htmlAppendInlineNode(lines, child, style)
+	}
+}
+
+func htmlAppendLineSpan(lines *[][]markdownSpan, span markdownSpan) {
+	if span.Text == "" {
+		return
+	}
+	if len(*lines) == 0 {
+		*lines = append(*lines, nil)
+	}
+	lastIndex := len(*lines) - 1
+	(*lines)[lastIndex] = append((*lines)[lastIndex], span)
+}
+
+func normalizeHTMLText(value string) string {
+	value = stdhtml.UnescapeString(value)
+	if value == "" {
+		return ""
+	}
+
+	var builder strings.Builder
+	lastSpace := false
+	for _, r := range value {
+		if unicode.IsSpace(r) {
+			if lastSpace {
+				continue
+			}
+			builder.WriteByte(' ')
+			lastSpace = true
+			continue
+		}
+		builder.WriteRune(r)
+		lastSpace = false
+	}
+	return builder.String()
+}
+
+func htmlNodePlainText(node *xhtml.Node) string {
+	var builder strings.Builder
+	var walk func(*xhtml.Node)
+	walk = func(current *xhtml.Node) {
+		switch current.Type {
+		case xhtml.TextNode:
+			builder.WriteString(stdhtml.UnescapeString(current.Data))
+		case xhtml.ElementNode:
+			if current.Data == "br" {
+				builder.WriteByte('\n')
+				return
+			}
+			for child := current.FirstChild; child != nil; child = child.NextSibling {
+				walk(child)
+			}
+		}
+	}
+	for child := node.FirstChild; child != nil; child = child.NextSibling {
+		walk(child)
+	}
+	return builder.String()
+}
+
+func mergedMarkdownStyle(base, overlay widget.RichTextStyle) widget.RichTextStyle {
+	style := base
+	if style.SizeName == "" {
+		style.SizeName = theme.SizeNameText
+	}
+	if overlay.ColorName != "" {
+		style.ColorName = overlay.ColorName
+	}
+	if overlay.SizeName != "" {
+		style.SizeName = overlay.SizeName
+	}
+	style.Inline = style.Inline || overlay.Inline
+	style.TextStyle.Bold = style.TextStyle.Bold || overlay.TextStyle.Bold
+	style.TextStyle.Italic = style.TextStyle.Italic || overlay.TextStyle.Italic
+	style.TextStyle.Monospace = style.TextStyle.Monospace || overlay.TextStyle.Monospace
+	return style
+}
+
+func normalizeMarkdownLines(lines [][]markdownSpan) [][]markdownSpan {
+	normalized := make([][]markdownSpan, 0, len(lines))
+	for _, line := range lines {
+		compacted := compactMarkdownSpans(compactInlineBoundarySpaces(trimMarkdownLine(line)))
+		if len(compacted) == 0 {
+			normalized = append(normalized, nil)
+			continue
+		}
+		normalized = append(normalized, compacted)
+	}
+
+	for len(normalized) > 0 && len(normalized[0]) == 0 {
+		normalized = normalized[1:]
+	}
+	for len(normalized) > 0 && len(normalized[len(normalized)-1]) == 0 {
+		normalized = normalized[:len(normalized)-1]
+	}
+	return normalized
+}
+
+func trimMarkdownLine(line []markdownSpan) []markdownSpan {
+	if len(line) == 0 {
+		return nil
+	}
+
+	trimmed := append([]markdownSpan(nil), line...)
+	for len(trimmed) > 0 {
+		updated := strings.TrimLeftFunc(trimmed[0].Text, unicode.IsSpace)
+		if updated == "" {
+			trimmed = trimmed[1:]
+			continue
+		}
+		trimmed[0].Text = updated
+		break
+	}
+	for len(trimmed) > 0 {
+		lastIndex := len(trimmed) - 1
+		updated := strings.TrimRightFunc(trimmed[lastIndex].Text, unicode.IsSpace)
+		if updated == "" {
+			trimmed = trimmed[:lastIndex]
+			continue
+		}
+		trimmed[lastIndex].Text = updated
+		break
+	}
+	return trimmed
+}
+
+func compactInlineBoundarySpaces(line []markdownSpan) []markdownSpan {
+	if len(line) < 2 {
+		return line
+	}
+
+	compacted := append([]markdownSpan(nil), line...)
+	for i := 0; i < len(compacted)-1; i++ {
+		left := compacted[i]
+		right := compacted[i+1]
+
+		leftRune, leftOK := lastNonSpaceRune(left.Text)
+		rightRune, rightOK := firstNonSpaceRune(right.Text)
+		if !leftOK || !rightOK {
+			continue
+		}
+
+		if hasStyledBoundary(left, right) && isCJKKanaHangulRune(leftRune) && isCJKKanaHangulRune(rightRune) {
+			left.Text = strings.TrimRightFunc(left.Text, unicode.IsSpace)
+			right.Text = strings.TrimLeftFunc(right.Text, unicode.IsSpace)
+		}
+
+		if hasStyledBoundary(left, right) && isCJKKanaHangulRune(leftRune) {
+			right.Text = strings.TrimLeftFunc(right.Text, unicode.IsSpace)
+		}
+		if hasStyledBoundary(left, right) && isCJKKanaHangulRune(rightRune) {
+			left.Text = strings.TrimRightFunc(left.Text, unicode.IsSpace)
+		}
+
+		compacted[i] = left
+		compacted[i+1] = right
+	}
+
+	return compactMarkdownSpans(compacted)
+}
+
+func hasStyledBoundary(left, right markdownSpan) bool {
+	return isInlineAccentSpan(left) || isInlineAccentSpan(right)
+}
+
+func isInlineAccentSpan(span markdownSpan) bool {
+	return isInlineAccentStyle(span.Style)
+}
+
+func isInlineAccentStyle(style widget.RichTextStyle) bool {
+	return style.TextStyle.Monospace || style.ColorName == theme.ColorNamePrimary || style.TextStyle.Italic
+}
+
+func firstNonSpaceRune(value string) (rune, bool) {
+	for _, r := range value {
+		if !unicode.IsSpace(r) {
+			return r, true
+		}
+	}
+	return 0, false
+}
+
+func lastNonSpaceRune(value string) (rune, bool) {
+	last := rune(0)
+	found := false
+	for _, r := range value {
+		if unicode.IsSpace(r) {
+			continue
+		}
+		last = r
+		found = true
+	}
+	return last, found
+}
+
+func isCJKKanaHangulRune(r rune) bool {
+	return unicode.Is(unicode.Han, r) || unicode.Is(unicode.Hiragana, r) || unicode.Is(unicode.Katakana, r) || unicode.Is(unicode.Hangul, r)
+}
+
+func markdownJoinLines(lines [][]markdownSpan) []markdownSpan {
+	joined := make([]markdownSpan, 0, len(lines)*2)
+	for i, line := range lines {
+		if i > 0 {
+			joined = append(joined, markdownSpan{Text: "\n", Style: widget.RichTextStyleInline})
+		}
+		joined = append(joined, line...)
+	}
+	return compactMarkdownSpans(joined)
+}
+
+func markdownLinesAllCodeOnly(lines [][]markdownSpan) bool {
+	if len(lines) == 0 {
+		return false
+	}
+	for _, line := range lines {
+		if !markdownLineIsCodeOnly(line) {
+			return false
+		}
+	}
+	return true
+}
+
+func markdownLineIsCodeOnly(line []markdownSpan) bool {
+	hasCode := false
+	for _, span := range line {
+		if strings.TrimSpace(span.Text) == "" {
+			continue
+		}
+		if !span.Style.TextStyle.Monospace {
+			return false
+		}
+		hasCode = true
+	}
+	return hasCode
+}
+
+func markdownCodeLinesText(lines [][]markdownSpan) string {
+	parts := make([]string, 0, len(lines))
+	for _, line := range lines {
+		var builder strings.Builder
+		for _, span := range line {
+			builder.WriteString(span.Text)
+		}
+		text := strings.TrimSpace(builder.String())
+		if text != "" {
+			parts = append(parts, text)
+		}
+	}
+	return strings.Join(parts, "\n")
+}
+
+func markdownObjects(segments []widget.RichTextSegment, darkMode bool) []fyne.CanvasObject {
+	objects := make([]fyne.CanvasObject, 0, len(segments))
+	for _, segment := range segments {
+		switch item := segment.(type) {
+		case *widget.TextSegment:
+			if item.Style == widget.RichTextStyleCodeBlock {
+				objects = append(objects, newMarkdownCodeBlockObject(item.Text, darkMode))
+				continue
+			}
+			objects = append(objects, newMarkdownParagraph([]markdownSpan{markdownSpanFromTextSegment(item)}))
+		case *widget.ParagraphSegment:
+			if text, ok := markdownCodeOnlyText(item.Texts); ok {
+				objects = append(objects, newMarkdownCodeBlockObject(text, darkMode))
+				continue
+			}
+			if spans := markdownSpans(item.Texts); len(spans) > 0 {
+				objects = append(objects, newMarkdownParagraph(spans))
+			}
+		case *widget.ListSegment:
+			objects = append(objects, markdownObjects(item.Segments(), darkMode)...)
+		case *widget.HyperlinkSegment:
+			objects = append(objects, newMarkdownParagraph([]markdownSpan{{
+				Text:  item.Text,
+				Style: markdownLinkStyle(),
+			}}))
+		case *widget.SeparatorSegment:
+			objects = append(objects, widget.NewSeparator())
+		}
+	}
+	return objects
+}
+
+func markdownCodeOnlyText(segments []widget.RichTextSegment) (string, bool) {
+	var builder strings.Builder
+	hasCode := false
+
+	for _, segment := range segments {
 		switch item := segment.(type) {
 		case *widget.TextSegment:
 			switch item.Style {
 			case widget.RichTextStyleCodeInline:
-				item.Style = widget.RichTextStyle{
-					ColorName: theme.ColorNamePrimary,
-					Inline:    true,
-					SizeName:  theme.SizeNameText,
-					TextStyle: fyne.TextStyle{Monospace: true, Bold: true},
+				builder.WriteString(item.Text)
+				hasCode = true
+			case widget.RichTextStyleInline:
+				if strings.TrimSpace(item.Text) != "" {
+					return "", false
 				}
-			case widget.RichTextStyleCodeBlock:
-				segments[i] = &markdownCodeBlockSegment{Text: item.Text}
+				builder.WriteString(item.Text)
+			default:
+				return "", false
 			}
-		case *widget.ParagraphSegment:
-			styleMarkdownSegments(item.Texts)
-		case *widget.ListSegment:
-			styleMarkdownSegments(item.Items)
+		default:
+			return "", false
 		}
+	}
+
+	if !hasCode {
+		return "", false
+	}
+	return strings.Trim(builder.String(), "\n"), true
+}
+
+func markdownSpans(segments []widget.RichTextSegment) []markdownSpan {
+	spans := make([]markdownSpan, 0, len(segments))
+	for _, segment := range segments {
+		switch item := segment.(type) {
+		case *widget.TextSegment:
+			if item.Style == widget.RichTextStyleCodeBlock {
+				continue
+			}
+			spans = append(spans, markdownSpanFromTextSegment(item))
+		case *widget.HyperlinkSegment:
+			spans = append(spans, markdownSpan{
+				Text:  item.Text,
+				Style: markdownLinkStyle(),
+			})
+		case *widget.ParagraphSegment:
+			spans = append(spans, markdownSpans(item.Texts)...)
+		}
+	}
+	return compactMarkdownSpans(spans)
+}
+
+func markdownSpanFromTextSegment(segment *widget.TextSegment) markdownSpan {
+	style := segment.Style
+	switch segment.Style {
+	case widget.RichTextStyleCodeInline:
+		style = markdownCodeInlineStyle()
+	case widget.RichTextStyleInline:
+		style = widget.RichTextStyleInline
+	}
+	return markdownSpan{
+		Text:  segment.Text,
+		Style: style,
+	}
+}
+
+func markdownCodeInlineStyle() widget.RichTextStyle {
+	return widget.RichTextStyle{
+		ColorName: theme.ColorNamePrimary,
+		Inline:    true,
+		SizeName:  theme.SizeNameText,
+		TextStyle: fyne.TextStyle{Monospace: true, Bold: true},
+	}
+}
+
+func markdownLinkStyle() widget.RichTextStyle {
+	return widget.RichTextStyle{
+		ColorName: theme.ColorNamePrimary,
+		Inline:    true,
+		SizeName:  theme.SizeNameText,
+		TextStyle: fyne.TextStyle{Bold: true},
 	}
 }
 
 func spacedMarkdown(value string) string {
 	value = strings.ReplaceAll(value, "\r\n", "\n")
 	value = strings.ReplaceAll(value, "\r", "\n")
-	lines := strings.Split(value, "\n")
-	out := make([]string, 0, len(lines)+8)
-	inFence := false
-
-	for i, line := range lines {
-		trimmed := strings.TrimSpace(line)
-		if strings.HasPrefix(trimmed, "```") || strings.HasPrefix(trimmed, "~~~") {
-			inFence = !inFence
-			out = append(out, line)
-			continue
-		}
-		if !inFence && trimmed == "" {
-			out = append(out, line)
-			if i > 0 && i < len(lines)-1 {
-				prev := strings.TrimSpace(lines[i-1])
-				next := strings.TrimSpace(lines[i+1])
-				if prev != "" && next != "" {
-					out = append(out, "&#8203;")
-				}
-			}
-			continue
-		}
-		out = append(out, line)
-	}
-
-	return strings.Join(out, "\n")
+	return value
 }
 
 type markdownCodeBlockSegment struct {
-	Text string
+	Text     string
+	DarkMode bool
 }
 
 func (s *markdownCodeBlockSegment) Inline() bool {
@@ -2833,7 +3908,7 @@ func (s *markdownCodeBlockSegment) Textual() string {
 }
 
 func (s *markdownCodeBlockSegment) Visual() fyne.CanvasObject {
-	return newMarkdownCodeBlockObject(s.Text)
+	return newMarkdownCodeBlockObject(s.Text, s.DarkMode)
 }
 
 func (s *markdownCodeBlockSegment) Update(o fyne.CanvasObject) {
@@ -2841,7 +3916,7 @@ func (s *markdownCodeBlockSegment) Update(o fyne.CanvasObject) {
 	if !ok {
 		return
 	}
-	replacement, ok := newMarkdownCodeBlockObject(s.Text).(*fyne.Container)
+	replacement, ok := newMarkdownCodeBlockObject(s.Text, s.DarkMode).(*fyne.Container)
 	if !ok {
 		return
 	}
@@ -2858,9 +3933,8 @@ func (s *markdownCodeBlockSegment) SelectedText() string {
 
 func (s *markdownCodeBlockSegment) Unselect() {}
 
-func newMarkdownCodeBlockObject(text string) fyne.CanvasObject {
-	bg := canvas.NewRectangle(codeBlockFill())
-	bg.CornerRadius = 12
+func newMarkdownCodeBlockObject(text string, darkMode bool) fyne.CanvasObject {
+	_ = darkMode
 
 	code := widget.NewRichText(&widget.TextSegment{
 		Style: widget.RichTextStyle{
@@ -2871,19 +3945,7 @@ func newMarkdownCodeBlockObject(text string) fyne.CanvasObject {
 		Text: text,
 	})
 	code.Wrapping = fyne.TextWrapBreak
-
-	return container.NewStack(
-		bg,
-		container.NewPadded(code),
-	)
-}
-
-func codeBlockFill() color.Color {
-	variant := fyne.CurrentApp().Settings().ThemeVariant()
-	if variant == theme.VariantLight {
-		return color.NRGBA{R: 0xEA, G: 0xED, B: 0xF1, A: 0xFF}
-	}
-	return color.NRGBA{R: 0x22, G: 0x26, B: 0x2C, A: 0xFF}
+	return code
 }
 
 func metaForeground(darkMode bool) color.Color {
