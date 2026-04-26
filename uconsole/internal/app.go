@@ -929,7 +929,6 @@ func annotateNotifications(server BuddyServer, notifications []NotificationRespo
 	}
 	out := make([]NotificationResponse, 0, len(notifications))
 	for _, item := range notifications {
-		item.Kind = normalizeCompatNotificationKind(item.Kind)
 		item.ServerID = server.ID
 		item.ServerName = server.DisplayName()
 		item.ServerURL = server.BaseURL
@@ -1008,10 +1007,6 @@ func aggregateSnapshots(snapshots []serverSnapshot) (StatusResponse, []Notificat
 
 	status.Sessions = sessions
 	status.SessionsCount = len(sessions)
-	if len(sessions) > 0 {
-		status.ActiveSessionID = sessions[0].SessionID
-		status.ActiveSessionDisplayTitle = sessionLabel(sessions[0])
-	}
 	if !connected {
 		status.OverallState = model.StateOffline
 	}
@@ -2203,7 +2198,7 @@ func sessionRow(session SessionResponse, darkMode bool) fyne.CanvasObject {
 	)
 
 	var middle fyne.CanvasObject = layout.NewSpacer()
-	if summary := firstNonEmptyText(session.AttentionSummary, session.Summary); summary != "" {
+	if summary := firstNonEmptyText(session.OpenSummary, session.Summary); summary != "" {
 		summaryLabel := widget.NewLabel(summary)
 		summaryLabel.Wrapping = fyne.TextWrapWord
 		middle = summaryLabel

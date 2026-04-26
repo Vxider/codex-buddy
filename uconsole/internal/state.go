@@ -7,12 +7,7 @@ import (
 )
 
 func normalizeCompatState(state model.State) model.State {
-	switch strings.ToLower(strings.TrimSpace(string(state))) {
-	case "attention":
-		return model.StateOpen
-	default:
-		return state
-	}
+	return model.State(strings.ToLower(strings.TrimSpace(string(state))))
 }
 
 func normalizeSessionState(state model.State) model.State {
@@ -22,14 +17,5 @@ func normalizeSessionState(state model.State) model.State {
 		return model.StateIdle
 	default:
 		return state
-	}
-}
-
-func normalizeCompatNotificationKind(kind model.NotificationKind) model.NotificationKind {
-	switch strings.ToLower(strings.TrimSpace(string(kind))) {
-	case "attention":
-		return model.NotificationOpen
-	default:
-		return kind
 	}
 }

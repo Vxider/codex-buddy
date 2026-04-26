@@ -82,9 +82,6 @@ struct PhoneContentView: View {
                 VStack(alignment: .leading, spacing: 4) {
                     Text(model.isOffline ? CodexState.offline.displayName : model.snapshot.overallState.displayName)
                         .font(.headline)
-                    Text(model.snapshot.phoneActiveSessionTitle ?? "No active session")
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
                     Text("Updated \(CodexFormatters.shortTime(model.snapshot.serverTime))")
                         .font(.caption)
                         .foregroundStyle(.secondary)

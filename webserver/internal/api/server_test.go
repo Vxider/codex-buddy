@@ -44,7 +44,7 @@ func (s stubSessionOpenChecker) IsOpen(session model.SessionSnapshot) bool {
 	return open
 }
 
-func TestStatusIncludesAttentionSummaryAndContinueAction(t *testing.T) {
+func TestStatusIncludesOpenSummaryAndContinueAction(t *testing.T) {
 	st := newAttentionStore(t)
 	server := NewServer(config.Config{}, st, nil, &stubContinueExecutor{}, nil, log.New(io.Discard, "", 0))
 
@@ -63,9 +63,6 @@ func TestStatusIncludesAttentionSummaryAndContinueAction(t *testing.T) {
 	if out.OverallState != model.StateAttention {
 		t.Fatalf("expected attention overall state, got %s", out.OverallState)
 	}
-	if out.ActiveSessionDisplayTitle != "sidebar" {
-		t.Fatalf("unexpected active display title: %q", out.ActiveSessionDisplayTitle)
-	}
 	if len(out.Sessions) != 1 {
 		t.Fatalf("expected one session, got %d", len(out.Sessions))
 	}
@@ -80,14 +77,17 @@ func TestStatusIncludesAttentionSummaryAndContinueAction(t *testing.T) {
 	if session.MicroTitle != "sidebar" {
 		t.Fatalf("unexpected micro title: %q", session.MicroTitle)
 	}
-	if session.AttentionSummary != "Need confirmation before overwriting files" {
-		t.Fatalf("unexpected attention summary: %q", session.AttentionSummary)
+	if session.OpenSummary != "Need confirmation before overwriting files" {
+		t.Fatalf("unexpected open summary: %q", session.OpenSummary)
 	}
-	if session.CompactAttention != "Need confirmation before overwriting files" {
-		t.Fatalf("unexpected compact attention summary: %q", session.CompactAttention)
+	if session.CompactOpen != "Need confirmation before overwriting files" {
+		t.Fatalf("unexpected compact open summary: %q", session.CompactOpen)
 	}
-	if session.MicroAttention != "Need confirmation before overwriting files" {
-		t.Fatalf("unexpected micro attention summary: %q", session.MicroAttention)
+	if session.MicroOpen != "Need confirmation before overwriting files" {
+		t.Fatalf("unexpected micro open summary: %q", session.MicroOpen)
+	}
+	if !session.NeedsOpen {
+		t.Fatalf("expected session to need open follow-up")
 	}
 	if !session.CanContinue {
 		t.Fatalf("expected session to be continuable")
@@ -179,8 +179,8 @@ func TestStatusTitleDoesNotReuseAssistantSummary(t *testing.T) {
 	if session.MicroTitle != "payments" {
 		t.Fatalf("expected micro cwd-derived title, got %q", session.MicroTitle)
 	}
-	if session.AttentionSummary != "Approval required before editing billing rules" {
-		t.Fatalf("unexpected attention summary: %q", session.AttentionSummary)
+	if session.OpenSummary != "Approval required before editing billing rules" {
+		t.Fatalf("unexpected open summary: %q", session.OpenSummary)
 	}
 }
 
@@ -369,12 +369,6 @@ func TestStatusIncludesCompactMobileFields(t *testing.T) {
 	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
 		t.Fatalf("decode status: %v", err)
 	}
-	if out.ActiveSessionCompactTitle == "" {
-		t.Fatalf("expected active compact title")
-	}
-	if out.ActiveSessionMicroTitle == "" {
-		t.Fatalf("expected active micro title")
-	}
 	if len(out.Sessions) != 1 {
 		t.Fatalf("expected one session, got %d", len(out.Sessions))
 	}
@@ -395,23 +389,23 @@ func TestStatusIncludesCompactMobileFields(t *testing.T) {
 	if len([]rune(session.MicroTitle)) > 24 {
 		t.Fatalf("expected micro title to be very short, got %q", session.MicroTitle)
 	}
-	if session.CompactAttention == "" {
-		t.Fatalf("expected compact attention summary")
+	if session.CompactOpen == "" {
+		t.Fatalf("expected compact open summary")
 	}
-	if !strings.Contains(session.CompactAttention, "Approval required") {
-		t.Fatalf("expected compact attention summary to preserve tail context, got %q", session.CompactAttention)
+	if !strings.Contains(session.CompactOpen, "Approval required") {
+		t.Fatalf("expected compact open summary to preserve tail context, got %q", session.CompactOpen)
 	}
-	if len([]rune(session.CompactAttention)) > 72 {
-		t.Fatalf("expected compact attention summary to be short, got %q", session.CompactAttention)
+	if len([]rune(session.CompactOpen)) > 72 {
+		t.Fatalf("expected compact open summary to be short, got %q", session.CompactOpen)
 	}
-	if session.MicroAttention == "" {
-		t.Fatalf("expected micro attention summary")
+	if session.MicroOpen == "" {
+		t.Fatalf("expected micro open summary")
 	}
-	if !strings.Contains(session.MicroAttention, "Approval required") {
-		t.Fatalf("expected micro attention summary to preserve tail context, got %q", session.MicroAttention)
+	if !strings.Contains(session.MicroOpen, "Approval required") {
+		t.Fatalf("expected micro open summary to preserve tail context, got %q", session.MicroOpen)
 	}
-	if len([]rune(session.MicroAttention)) > 44 {
-		t.Fatalf("expected micro attention summary to be very short, got %q", session.MicroAttention)
+	if len([]rune(session.MicroOpen)) > 44 {
+		t.Fatalf("expected micro open summary to be very short, got %q", session.MicroOpen)
 	}
 }
 
@@ -694,9 +688,6 @@ func TestStatusHidesSessionsThatAreNoLongerOpen(t *testing.T) {
 	}
 	if len(out.Sessions) != 1 {
 		t.Fatalf("expected one visible session item, got %d", len(out.Sessions))
-	}
-	if out.ActiveSessionID != "sess-visible" {
-		t.Fatalf("expected visible session to become active, got %q", out.ActiveSessionID)
 	}
 	if out.Sessions[0].SessionID != "sess-visible" {
 		t.Fatalf("expected only visible session in list, got %q", out.Sessions[0].SessionID)

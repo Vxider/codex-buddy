@@ -38,16 +38,15 @@ func runStatus(args []string) int {
 			fmt.Printf("marshal status: %v\n", err)
 			return 1
 		}
-		fmt.Println(string(data))
-		return 0
-	}
+	fmt.Println(string(data))
+	return 0
+}
 
-	fmt.Printf("overall: %s\n", status.OverallState)
-	fmt.Printf("active: %s\n", firstNonEmpty(status.ActiveSessionID, "-"))
-	fmt.Printf("sessions: %d\n", status.SessionsCount)
-	for _, session := range status.Sessions {
-		fmt.Printf("- %s %s\n", session.SessionID, session.State)
-	}
+fmt.Printf("overall: %s\n", status.OverallState)
+fmt.Printf("sessions: %d\n", status.SessionsCount)
+for _, session := range status.Sessions {
+	fmt.Printf("- %s %s\n", session.SessionID, session.State)
+}
 	return 0
 }
 

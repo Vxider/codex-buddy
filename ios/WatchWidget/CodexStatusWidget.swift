@@ -46,9 +46,9 @@ struct CodexStatusWidgetEntryView: View {
         let eyeSize = iconSize * 0.145
         let eyeOffsetX = iconSize * 0.16
         let eyeOffsetY = -iconSize * 0.14
-        let mouthWidth = iconSize * 0.28
-        let mouthHeight = stroke
-        let mouthOffsetY = iconSize * 0.14
+        let mouthWidth = iconSize * 0.34
+        let mouthHeight = iconSize * 0.18
+        let mouthOffsetY = iconSize * 0.12
 
         return ZStack {
             Circle()
@@ -62,15 +62,23 @@ struct CodexStatusWidgetEntryView: View {
                 .frame(width: eyeSize, height: eyeSize)
                 .offset(x: eyeOffsetX, y: eyeOffsetY)
 
-            Capsule(style: .circular)
-                .frame(width: mouthWidth, height: mouthHeight)
-                .rotationEffect(.degrees(45))
-                .offset(y: mouthOffsetY)
-
-            Capsule(style: .circular)
-                .frame(width: mouthWidth, height: mouthHeight)
-                .rotationEffect(.degrees(-45))
-                .offset(y: mouthOffsetY)
+            Path { path in
+                let start = CGPoint(
+                    x: (iconSize - mouthWidth) / 2,
+                    y: (iconSize / 2) + mouthOffsetY
+                )
+                let end = CGPoint(
+                    x: start.x + mouthWidth,
+                    y: start.y
+                )
+                let control = CGPoint(
+                    x: iconSize / 2,
+                    y: start.y + mouthHeight
+                )
+                path.move(to: start)
+                path.addQuadCurve(to: end, control: control)
+            }
+            .stroke(style: StrokeStyle(lineWidth: stroke * 1.2, lineCap: .round, lineJoin: .round))
         }
         .padding(stroke * 0.55)
     }

@@ -12,9 +12,6 @@ struct WatchContentView: View {
                     HStack(alignment: .top, spacing: 10) {
                         VStack(alignment: .leading, spacing: 3) {
                             statusBadge(model.snapshot.overallState)
-                            Text(model.snapshot.watchActiveSessionTitle ?? "No active session")
-                                .font(.caption2)
-                                .foregroundStyle(.secondary)
                         }
                         Spacer(minLength: 0)
                         Button {

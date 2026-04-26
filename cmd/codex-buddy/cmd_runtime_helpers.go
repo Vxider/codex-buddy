@@ -46,9 +46,8 @@ type apiSession struct {
 }
 
 type apiStatus struct {
-	ServerTime      time.Time    `json:"server_time"`
-	OverallState    model.State  `json:"overall_state"`
-	ActiveSessionID string       `json:"active_session_id,omitempty"`
-	SessionsCount   int          `json:"sessions_count"`
-	Sessions        []apiSession `json:"sessions"`
+	ServerTime    time.Time    `json:"server_time"`
+	OverallState  model.State  `json:"overall_state"`
+	SessionsCount int          `json:"sessions_count"`
+	Sessions      []apiSession `json:"sessions"`
 }

@@ -20,7 +20,7 @@ enum CodexState: String, Codable, CaseIterable, Hashable {
             self = .running
         case "running_bash":
             self = .runningBash
-        case "open", "attention":
+        case "open":
             self = .open
         case "error":
             self = .error
@@ -116,10 +116,10 @@ struct CodexSessionSummary: Codable, Identifiable, Hashable {
     let summary: String?
     let compactSummary: String?
     let microSummary: String?
-    let needsAttention: Bool
-    let attentionSummary: String?
-    let compactAttentionSummary: String?
-    let microAttentionSummary: String?
+    let needsOpen: Bool
+    let openSummary: String?
+    let compactOpenSummary: String?
+    let microOpenSummary: String?
     let canContinue: Bool
     let continueAction: CodexContinueAction?
 
@@ -135,12 +135,33 @@ struct CodexSessionSummary: Codable, Identifiable, Hashable {
         case summary
         case compactSummary = "compact_summary"
         case microSummary = "micro_summary"
-        case needsAttention = "needs_attention"
-        case attentionSummary = "attention_summary"
-        case compactAttentionSummary = "compact_attention_summary"
-        case microAttentionSummary = "micro_attention_summary"
+        case needsOpen = "needs_open"
+        case openSummary = "open_summary"
+        case compactOpenSummary = "compact_open_summary"
+        case microOpenSummary = "micro_open_summary"
         case canContinue = "can_continue"
         case continueAction = "continue_action"
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        sessionID = try container.decode(String.self, forKey: .sessionID)
+        shortSessionID = try container.decodeIfPresent(String.self, forKey: .shortSessionID)
+        displayTitle = try container.decodeIfPresent(String.self, forKey: .displayTitle)
+        compactTitle = try container.decodeIfPresent(String.self, forKey: .compactTitle)
+        microTitle = try container.decodeIfPresent(String.self, forKey: .microTitle)
+        state = try container.decode(CodexState.self, forKey: .state)
+        stateDetail = try container.decodeIfPresent(String.self, forKey: .stateDetail)
+        updatedAt = try container.decodeIfPresent(Date.self, forKey: .updatedAt)
+        summary = try container.decodeIfPresent(String.self, forKey: .summary)
+        compactSummary = try container.decodeIfPresent(String.self, forKey: .compactSummary)
+        microSummary = try container.decodeIfPresent(String.self, forKey: .microSummary)
+        needsOpen = try container.decodeIfPresent(Bool.self, forKey: .needsOpen) ?? false
+        openSummary = try container.decodeIfPresent(String.self, forKey: .openSummary)
+        compactOpenSummary = try container.decodeIfPresent(String.self, forKey: .compactOpenSummary)
+        microOpenSummary = try container.decodeIfPresent(String.self, forKey: .microOpenSummary)
+        canContinue = try container.decodeIfPresent(Bool.self, forKey: .canContinue) ?? false
+        continueAction = try container.decodeIfPresent(CodexContinueAction.self, forKey: .continueAction)
     }
 
     var id: String { sessionID }
@@ -184,8 +205,8 @@ struct CodexSessionSummary: Codable, Identifiable, Hashable {
     }
 
     private var fallbackSummary: String {
-        if let attentionSummary, !attentionSummary.isEmpty {
-            return attentionSummary
+        if let openSummary, !openSummary.isEmpty {
+            return openSummary
         }
         return summary ?? ""
     }
@@ -195,11 +216,11 @@ struct CodexSessionSummary: Codable, Identifiable, Hashable {
     var watchTitle: String { watchListTitle }
 
     var phoneSummary: String {
-        if let compactAttentionSummary, !compactAttentionSummary.isEmpty {
-            return compactAttentionSummary
+        if let compactOpenSummary, !compactOpenSummary.isEmpty {
+            return compactOpenSummary
         }
-        if let attentionSummary, !attentionSummary.isEmpty {
-            return attentionSummary
+        if let openSummary, !openSummary.isEmpty {
+            return openSummary
         }
         if let compactSummary, !compactSummary.isEmpty {
             return compactSummary
@@ -208,14 +229,14 @@ struct CodexSessionSummary: Codable, Identifiable, Hashable {
     }
 
     var watchSummary: String {
-        if let microAttentionSummary, !microAttentionSummary.isEmpty {
-            return microAttentionSummary
+        if let microOpenSummary, !microOpenSummary.isEmpty {
+            return microOpenSummary
         }
-        if let compactAttentionSummary, !compactAttentionSummary.isEmpty {
-            return compactAttentionSummary
+        if let compactOpenSummary, !compactOpenSummary.isEmpty {
+            return compactOpenSummary
         }
-        if let attentionSummary, !attentionSummary.isEmpty {
-            return attentionSummary
+        if let openSummary, !openSummary.isEmpty {
+            return openSummary
         }
         if let microSummary, !microSummary.isEmpty {
             return microSummary
@@ -228,10 +249,6 @@ struct CodexStatusSnapshot: Codable, Hashable {
     let serverTime: Date?
     let overallState: CodexState
     let overallStateDetail: String?
-    let activeSessionID: String?
-    let activeSessionDisplayTitle: String?
-    let activeSessionCompactTitle: String?
-    let activeSessionMicroTitle: String?
     let sessionsCount: Int
     let sessions: [CodexSessionSummary]
 
@@ -239,42 +256,14 @@ struct CodexStatusSnapshot: Codable, Hashable {
         case serverTime = "server_time"
         case overallState = "overall_state"
         case overallStateDetail = "overall_state_detail"
-        case activeSessionID = "active_session_id"
-        case activeSessionDisplayTitle = "active_session_display_title"
-        case activeSessionCompactTitle = "active_session_compact_title"
-        case activeSessionMicroTitle = "active_session_micro_title"
         case sessionsCount = "sessions_count"
         case sessions
-    }
-
-    var phoneActiveSessionTitle: String? {
-        if let activeSessionCompactTitle, !activeSessionCompactTitle.isEmpty {
-            return activeSessionCompactTitle
-        }
-        if let activeSessionDisplayTitle, !activeSessionDisplayTitle.isEmpty {
-            return activeSessionDisplayTitle
-        }
-        return activeSessionID
-    }
-
-    var watchActiveSessionTitle: String? {
-        if let activeSessionMicroTitle, !activeSessionMicroTitle.isEmpty {
-            return activeSessionMicroTitle
-        }
-        if let activeSessionDisplayTitle, !activeSessionDisplayTitle.isEmpty {
-            return activeSessionDisplayTitle
-        }
-        return activeSessionID
     }
 
     static let offline = CodexStatusSnapshot(
         serverTime: nil,
         overallState: .offline,
         overallStateDetail: nil,
-        activeSessionID: nil,
-        activeSessionDisplayTitle: nil,
-        activeSessionCompactTitle: nil,
-        activeSessionMicroTitle: nil,
         sessionsCount: 0,
         sessions: []
     )

@@ -7,13 +7,11 @@ import (
 )
 
 type StatusResponse struct {
-	ServerTime                time.Time         `json:"server_time"`
-	OverallState              model.State       `json:"overall_state"`
-	OverallStateDetail        string            `json:"overall_state_detail,omitempty"`
-	ActiveSessionID           string            `json:"active_session_id,omitempty"`
-	ActiveSessionDisplayTitle string            `json:"active_session_display_title,omitempty"`
-	SessionsCount             int               `json:"sessions_count"`
-	Sessions                  []SessionResponse `json:"sessions"`
+	ServerTime         time.Time         `json:"server_time"`
+	OverallState       model.State       `json:"overall_state"`
+	OverallStateDetail string            `json:"overall_state_detail,omitempty"`
+	SessionsCount      int               `json:"sessions_count"`
+	Sessions           []SessionResponse `json:"sessions"`
 }
 
 type SessionResponse struct {
@@ -24,8 +22,8 @@ type SessionResponse struct {
 	StateDetail      string                 `json:"state_detail,omitempty"`
 	UpdatedAt        time.Time              `json:"updated_at,omitempty"`
 	Summary          string                 `json:"summary,omitempty"`
-	NeedsAttention   bool                   `json:"needs_attention,omitempty"`
-	AttentionSummary string                 `json:"attention_summary,omitempty"`
+	NeedsOpen        bool                   `json:"needs_open,omitempty"`
+	OpenSummary      string                 `json:"open_summary,omitempty"`
 	CanContinue      bool                   `json:"can_continue,omitempty"`
 	ContinueAction   *ContinueActionPayload `json:"continue_action,omitempty"`
 	ServerID         string                 `json:"-"`
@@ -76,7 +74,6 @@ func (s StatusResponse) ToSnapshot() model.StatusSnapshot {
 		ServerTime:         s.ServerTime,
 		OverallState:       s.OverallState,
 		OverallStateDetail: s.OverallStateDetail,
-		ActiveSessionID:    s.ActiveSessionID,
 		SessionsCount:      s.SessionsCount,
 		Sessions:           sessions,
 	}
@@ -86,7 +83,7 @@ func (n NotificationResponse) ToSnapshot() model.NotificationSnapshot {
 	return model.NotificationSnapshot{
 		ID:          n.ID,
 		SessionID:   n.SessionID,
-		Kind:        normalizeCompatNotificationKind(n.Kind),
+		Kind:        n.Kind,
 		State:       n.State,
 		Title:       n.Title,
 		Summary:     n.Summary,

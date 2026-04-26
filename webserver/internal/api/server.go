@@ -40,10 +40,10 @@ type publicSession struct {
 	Summary          string                `json:"summary,omitempty"`
 	CompactSummary   string                `json:"compact_summary,omitempty"`
 	MicroSummary     string                `json:"micro_summary,omitempty"`
-	NeedsAttention   bool                  `json:"needs_attention"`
-	AttentionSummary string                `json:"attention_summary,omitempty"`
-	CompactAttention string                `json:"compact_attention_summary,omitempty"`
-	MicroAttention   string                `json:"micro_attention_summary,omitempty"`
+	NeedsOpen        bool                  `json:"needs_open"`
+	OpenSummary      string                `json:"open_summary,omitempty"`
+	CompactOpen      string                `json:"compact_open_summary,omitempty"`
+	MicroOpen        string                `json:"micro_open_summary,omitempty"`
 	CanContinue      bool                  `json:"can_continue"`
 	ContinueAction   *publicContinueAction `json:"continue_action,omitempty"`
 }
@@ -56,15 +56,11 @@ type publicContinueAction struct {
 }
 
 type publicStatus struct {
-	ServerTime                time.Time       `json:"server_time"`
-	OverallState              model.State     `json:"overall_state"`
-	OverallStateDetail        string          `json:"overall_state_detail,omitempty"`
-	ActiveSessionID           string          `json:"active_session_id,omitempty"`
-	ActiveSessionDisplayTitle string          `json:"active_session_display_title,omitempty"`
-	ActiveSessionCompactTitle string          `json:"active_session_compact_title,omitempty"`
-	ActiveSessionMicroTitle   string          `json:"active_session_micro_title,omitempty"`
-	SessionsCount             int             `json:"sessions_count"`
-	Sessions                  []publicSession `json:"sessions"`
+	ServerTime         time.Time       `json:"server_time"`
+	OverallState       model.State     `json:"overall_state"`
+	OverallStateDetail string          `json:"overall_state_detail,omitempty"`
+	SessionsCount      int             `json:"sessions_count"`
+	Sessions           []publicSession `json:"sessions"`
 }
 
 type publicNotification struct {
@@ -343,25 +339,13 @@ func (s *Server) decorateSnapshot(snapshot model.StatusSnapshot) model.StatusSna
 func (s *Server) publicStatus(snapshot model.StatusSnapshot) publicStatus {
 	notifications := s.notificationIndex()
 	titles := sessionTitles(snapshot.Sessions)
-	activeTitle := ""
-	activeCompactTitle := ""
-	activeMicroTitle := ""
-	if title, ok := titles[snapshot.ActiveSessionID]; ok {
-		activeTitle = title.Display
-		activeCompactTitle = title.Compact
-		activeMicroTitle = title.Micro
-	}
 
 	return publicStatus{
-		ServerTime:                snapshot.ServerTime,
-		OverallState:              snapshot.OverallState,
-		OverallStateDetail:        snapshot.OverallStateDetail,
-		ActiveSessionID:           snapshot.ActiveSessionID,
-		ActiveSessionDisplayTitle: activeTitle,
-		ActiveSessionCompactTitle: activeCompactTitle,
-		ActiveSessionMicroTitle:   activeMicroTitle,
-		SessionsCount:             len(snapshot.Sessions),
-		Sessions:                  s.publicSessions(snapshot.Sessions, notifications, titles),
+		ServerTime:         snapshot.ServerTime,
+		OverallState:       snapshot.OverallState,
+		OverallStateDetail: snapshot.OverallStateDetail,
+		SessionsCount:      len(snapshot.Sessions),
+		Sessions:           s.publicSessions(snapshot.Sessions, notifications, titles),
 	}
 }
 
@@ -387,14 +371,14 @@ func (s *Server) publicSession(session model.SessionSnapshot, notification model
 		Summary:        fullSummary,
 		CompactSummary: compactSummary(fullSummary, false),
 		MicroSummary:   microSummary(fullSummary, false),
-		NeedsAttention: session.State == model.StateAttention,
+		NeedsOpen:      session.State == model.StateAttention,
 	}
 
 	if notification.ID != "" {
-		item.AttentionSummary = notification.Summary
-		item.CompactAttention = compactSummary(notification.Summary, true)
-		item.MicroAttention = microSummary(notification.Summary, true)
-		item.NeedsAttention = notification.Kind == model.NotificationAttention
+		item.OpenSummary = notification.Summary
+		item.CompactOpen = compactSummary(notification.Summary, true)
+		item.MicroOpen = microSummary(notification.Summary, true)
+		item.NeedsOpen = notification.Kind == model.NotificationAttention
 		item.CanContinue = slices.Contains(notification.Actions, model.NotificationActionContinue)
 		if item.CanContinue {
 			item.ContinueAction = &publicContinueAction{
@@ -816,16 +800,13 @@ var debugPageHTML = `<!doctype html>
   <div class="wrap">
     <div class="card" style="margin-top:16px;">
       <h1>codex-buddy Status</h1>
-      <p class="muted">Shows aggregate state, session summaries, open-state details, and continue capability for browser, uConsole, and mobile clients.</p>
       <div class="summary">
         <div>
           <div class="muted">aggregate status</div>
           <div style="margin-top:8px;"><span class="status status-offline" id="overall">offline</span></div>
         </div>
         <div style="text-align:right;">
-          <div class="muted">active session</div>
-          <div id="activeSession">-</div>
-          <div class="muted" id="serverTime" style="margin-top:8px;">server_time: -</div>
+          <div class="muted" id="serverTime">server_time: -</div>
         </div>
       </div>
       <h2 style="margin-top:20px;">Sessions</h2>
@@ -862,7 +843,6 @@ var debugPageHTML = `<!doctype html>
     function render(snapshot) {
       renderStateChip(document.getElementById('overall'), snapshot.overall_state);
       document.getElementById('serverTime').textContent = 'server_time: ' + (snapshot.server_time || '-');
-      document.getElementById('activeSession').textContent = snapshot.active_session_display_title || snapshot.active_session_id || '-';
       const sessions = document.getElementById('sessions');
       sessions.innerHTML = '';
       if (!Array.isArray(snapshot.sessions) || snapshot.sessions.length === 0) {
@@ -871,7 +851,7 @@ var debugPageHTML = `<!doctype html>
       }
       snapshot.sessions.forEach((session) => {
         const title = session.display_title || session.short_session_id || session.session_id || 'unknown';
-        const detail = session.attention_summary || session.summary || '';
+        const detail = session.open_summary || session.summary || '';
         const meta = [];
         if (session.short_session_id) meta.push(session.short_session_id);
         if (session.updated_at) meta.push(session.updated_at);
