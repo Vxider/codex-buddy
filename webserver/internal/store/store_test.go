@@ -217,6 +217,42 @@ func TestChineseContinueNextRoundOfferStopBecomesAttention(t *testing.T) {
 	}
 }
 
+func TestAttentionNotificationSummaryPreservesFullAssistantReply(t *testing.T) {
+	st := New(30*time.Second, 0, log.New(io.Discard, "", 0))
+	now := time.Now().UTC()
+	fullReply := "这轮继续做了两处共享层收口，都是同类根因的全局修正，不是局部补丁。\n\n`AskData` 这边把 multipart 顺序改正了，未登录请求不会再提前触发上传解析，同时把共享鉴权上下文复用到了后续处理链路。\n\n`System Manage` 这边把真实路径约束也补齐了，避免通过 symlink 越出允许根目录；如果你继续，我下一轮会把剩余同类入口再统一扫一遍。"
+
+	st.ApplyIngest(model.IngestRequest{
+		EventName:  "user-prompt-submit",
+		ReceivedAt: now,
+		Payload: model.HookPayload{
+			SessionID: "sess-full-open-notification",
+			Prompt:    "继续排查共享层问题",
+			TmuxPane:  "%12",
+		},
+	})
+	st.ApplyIngest(model.IngestRequest{
+		EventName:  "stop",
+		ReceivedAt: now.Add(time.Second),
+		Payload: model.HookPayload{
+			SessionID:            "sess-full-open-notification",
+			TmuxPane:             "%12",
+			LastAssistantMessage: fullReply,
+		},
+	})
+
+	notifications := st.Notifications()
+	if len(notifications) != 1 {
+		t.Fatalf("expected one notification, got %d", len(notifications))
+	}
+	if notifications[0].Summary != fullReply {
+		t.Fatalf("expected full notification summary, got %q", notifications[0].Summary)
+	}
+	if len([]rune(fullReply)) <= 160 {
+		t.Fatalf("expected test fixture to exceed preview length, got %d", len([]rune(fullReply)))
+	}
+}
+
 func TestApplyTranscriptUpdateEnrichesSession(t *testing.T) {
 	st := New(50*time.Millisecond, 50*time.Millisecond, log.New(io.Discard, "", 0))
 	update := model.TranscriptUpdate{

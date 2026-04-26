@@ -103,6 +103,64 @@ func TestStatusIncludesOpenSummaryAndContinueAction(t *testing.T) {
 	}
 }
 
+func TestOpenSummaryPreservesFullAssistantReply(t *testing.T) {
+	st := store.New(30*time.Second, 0, log.New(io.Discard, "", 0))
+	now := time.Date(2026, 4, 26, 8, 0, 0, 0, time.UTC)
+	fullReply := "先给你结论：当前数据库迁移不需要回滚。\n\n我已经核对了 schema 差异、线上数据分布、历史兼容逻辑和回滚窗口，现阶段风险主要在兼容层，而不是数据损坏；真正需要处理的是旧调用链、灰度入口和文件命名约束没有完全统一。\n\n如果你继续，我下一步会把兼容迁移、旧路径清理、权限边界补丁和回归验证一起收口，避免你后面再分三轮重复确认。"
+
+	st.ApplyIngest(model.IngestRequest{
+		EventName:  "user-prompt-submit",
+		ReceivedAt: now,
+		Payload: model.HookPayload{
+			SessionID: "sess-open-full",
+			CWD:       "/repo/payments",
+			Prompt:    "检查迁移风险",
+			TmuxPane:  "%71",
+		},
+	})
+	st.ApplyIngest(model.IngestRequest{
+		EventName:  "stop",
+		ReceivedAt: now.Add(time.Second),
+		Payload: model.HookPayload{
+			SessionID:            "sess-open-full",
+			CWD:                  "/repo/payments",
+			TmuxPane:             "%71",
+			LastAssistantMessage: fullReply,
+		},
+	})
+
+	server := NewServer(config.Config{}, st, nil, &stubContinueExecutor{}, nil, log.New(io.Discard, "", 0))
+	req := httptest.NewRequest(http.MethodGet, "/v1/status", nil)
+	resp := httptest.NewRecorder()
+	server.Handler().ServeHTTP(resp, req)
+
+	if resp.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", resp.Code)
+	}
+
+	var out publicStatus
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		t.Fatalf("decode status: %v", err)
+	}
+	if len(out.Sessions) != 1 {
+		t.Fatalf("expected one session, got %d", len(out.Sessions))
+	}
+
+	session := out.Sessions[0]
+	if session.OpenSummary != fullReply {
+		t.Fatalf("expected full open summary, got %q", session.OpenSummary)
+	}
+	if len([]rune(fullReply)) <= 160 {
+		t.Fatalf("expected test fixture to exceed preview length, got %d", len([]rune(fullReply)))
+	}
+	if session.CompactOpen == fullReply {
+		t.Fatalf("expected compact open summary to remain condensed")
+	}
+	if !strings.Contains(session.CompactOpen, "如果你继续") {
+		t.Fatalf("expected compact open summary to preserve tail context, got %q", session.CompactOpen)
+	}
+}
+
 func TestEmptyStatusIsIdleWhenServerIsReachable(t *testing.T) {
 	st := store.New(0, 0, log.New(io.Discard, "", 0))
 	server := NewServer(config.Config{}, st, nil, &stubContinueExecutor{}, nil, log.New(io.Discard, "", 0))

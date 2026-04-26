@@ -793,7 +793,7 @@ var debugPageHTML = `<!doctype html>
     .session-main { min-width: 0; }
     .session-name { font-weight: 600; word-break: break-word; }
     .session-meta { margin-top: 4px; }
-    .session-summary { margin-top: 8px; color: #dbe6ff; word-break: break-word; }
+    .session-summary { margin-top: 8px; color: #dbe6ff; white-space: pre-wrap; word-break: break-word; overflow-wrap: anywhere; }
   </style>
 </head>
 <body>

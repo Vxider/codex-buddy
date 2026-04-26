@@ -78,6 +78,7 @@ func (s *Store) ApplyIngest(req model.IngestRequest) model.StatusSnapshot {
 		session.LastUserPromptPreview = preview(req.Payload.Prompt)
 	}
 	if req.Payload.LastAssistantMessage != "" {
+		session.LastAssistantMessageFull = strings.TrimSpace(req.Payload.LastAssistantMessage)
 		session.LastAssistantMessage = previewAssistant(req.Payload.LastAssistantMessage)
 	}
 	if req.Payload.Error != "" {
@@ -169,6 +170,7 @@ func (s *Store) ApplyTranscriptUpdate(update model.TranscriptUpdate) model.Statu
 		session.LastUserPromptPreview = preview(update.LastUserPromptPreview)
 	}
 	if update.LastAssistantMessage != "" {
+		session.LastAssistantMessageFull = strings.TrimSpace(update.LastAssistantMessage)
 		session.LastAssistantMessage = previewAssistant(update.LastAssistantMessage)
 	}
 	if update.LastBashCommand != "" {
@@ -690,7 +692,7 @@ func notificationSummary(session model.SessionSnapshot) string {
 	case model.StateError:
 		return present.ErrorSummary(session)
 	case model.StateAttention:
-		return firstNonEmpty(session.LastAssistantMessage, session.LastUserPromptPreview)
+		return firstNonEmptyRaw(session.LastAssistantMessageFull, session.LastAssistantMessage, session.LastUserPromptPreview)
 	default:
 		return ""
 	}
@@ -788,6 +790,15 @@ func firstNonEmpty(values ...string) string {
 	for _, value := range values {
 		if strings.TrimSpace(value) != "" {
 			return preview(value)
+		}
+	}
+	return ""
+}
+
+func firstNonEmptyRaw(values ...string) string {
+	for _, value := range values {
+		if trimmed := strings.TrimSpace(value); trimmed != "" {
+			return trimmed
 		}
 	}
 	return ""

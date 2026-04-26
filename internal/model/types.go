@@ -48,6 +48,7 @@ type SessionSnapshot struct {
 	StateDetail              string    `json:"state_detail,omitempty"`
 	LastUserPromptPreview    string    `json:"last_user_prompt_preview,omitempty"`
 	LastAssistantMessage     string    `json:"last_assistant_message,omitempty"`
+	LastAssistantMessageFull string    `json:"-"`
 	LastBashCommand          string    `json:"last_bash_command,omitempty"`
 	TranscriptPath           string    `json:"transcript_path,omitempty"`
 	LastError                string    `json:"-"`
