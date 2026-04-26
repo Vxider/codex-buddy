@@ -1,8 +1,10 @@
 package api
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
+	"html"
 	"log"
 	"net"
 	"net/http"
@@ -17,6 +19,9 @@ import (
 	"github.com/vxider/codex-buddy/webserver/internal/present"
 	"github.com/vxider/codex-buddy/webserver/internal/store"
 	"github.com/vxider/codex-buddy/webserver/internal/transcript"
+	"github.com/yuin/goldmark"
+	"github.com/yuin/goldmark/extension"
+	gmhtml "github.com/yuin/goldmark/renderer/html"
 )
 
 type Server struct {
@@ -29,23 +34,29 @@ type Server struct {
 }
 
 type publicSession struct {
-	SessionID        string                `json:"session_id"`
-	ShortSessionID   string                `json:"short_session_id,omitempty"`
-	DisplayTitle     string                `json:"display_title,omitempty"`
-	CompactTitle     string                `json:"compact_title,omitempty"`
-	MicroTitle       string                `json:"micro_title,omitempty"`
-	State            model.State           `json:"state"`
-	StateDetail      string                `json:"state_detail,omitempty"`
-	UpdatedAt        time.Time             `json:"updated_at"`
-	Summary          string                `json:"summary,omitempty"`
-	CompactSummary   string                `json:"compact_summary,omitempty"`
-	MicroSummary     string                `json:"micro_summary,omitempty"`
-	NeedsOpen        bool                  `json:"needs_open"`
-	OpenSummary      string                `json:"open_summary,omitempty"`
-	CompactOpen      string                `json:"compact_open_summary,omitempty"`
-	MicroOpen        string                `json:"micro_open_summary,omitempty"`
-	CanContinue      bool                  `json:"can_continue"`
-	ContinueAction   *publicContinueAction `json:"continue_action,omitempty"`
+	SessionID       string                `json:"session_id"`
+	ShortSessionID  string                `json:"short_session_id,omitempty"`
+	DisplayTitle    string                `json:"display_title,omitempty"`
+	CompactTitle    string                `json:"compact_title,omitempty"`
+	MicroTitle      string                `json:"micro_title,omitempty"`
+	State           model.State           `json:"state"`
+	StateDetail     string                `json:"state_detail,omitempty"`
+	UpdatedAt       time.Time             `json:"updated_at"`
+	Summary         string                `json:"summary,omitempty"`
+	SummaryMarkdown string                `json:"summary_markdown,omitempty"`
+	SummaryHTML     string                `json:"summary_html,omitempty"`
+	CompactSummary  string                `json:"compact_summary,omitempty"`
+	MicroSummary    string                `json:"micro_summary,omitempty"`
+	NeedsOpen       bool                  `json:"needs_open"`
+	NeedsApproval   bool                  `json:"needs_approval"`
+	OpenReason      string                `json:"open_reason,omitempty"`
+	OpenSummary     string                `json:"open_summary,omitempty"`
+	OpenMarkdown    string                `json:"open_summary_markdown,omitempty"`
+	OpenHTML        string                `json:"open_summary_html,omitempty"`
+	CompactOpen     string                `json:"compact_open_summary,omitempty"`
+	MicroOpen       string                `json:"micro_open_summary,omitempty"`
+	CanContinue     bool                  `json:"can_continue"`
+	ContinueAction  *publicContinueAction `json:"continue_action,omitempty"`
 }
 
 type publicContinueAction struct {
@@ -64,16 +75,18 @@ type publicStatus struct {
 }
 
 type publicNotification struct {
-	ID          string                     `json:"id"`
-	SessionID   string                     `json:"session_id"`
-	Kind        model.NotificationKind     `json:"kind"`
-	State       model.NotificationState    `json:"state"`
-	Title       string                     `json:"title"`
-	Summary     string                     `json:"summary"`
-	CreatedAt   time.Time                  `json:"created_at"`
-	UpdatedAt   time.Time                  `json:"updated_at"`
-	ActionToken string                     `json:"action_token,omitempty"`
-	Actions     []model.NotificationAction `json:"actions,omitempty"`
+	ID              string                     `json:"id"`
+	SessionID       string                     `json:"session_id"`
+	Kind            model.NotificationKind     `json:"kind"`
+	State           model.NotificationState    `json:"state"`
+	Title           string                     `json:"title"`
+	Summary         string                     `json:"summary"`
+	SummaryMarkdown string                     `json:"summary_markdown,omitempty"`
+	SummaryHTML     string                     `json:"summary_html,omitempty"`
+	CreatedAt       time.Time                  `json:"created_at"`
+	UpdatedAt       time.Time                  `json:"updated_at"`
+	ActionToken     string                     `json:"action_token,omitempty"`
+	Actions         []model.NotificationAction `json:"actions,omitempty"`
 }
 
 type sessionTitleSet struct {
@@ -359,26 +372,39 @@ func (s *Server) publicSessions(sessions []model.SessionSnapshot, notifications 
 
 func (s *Server) publicSession(session model.SessionSnapshot, notification model.NotificationSnapshot, titles sessionTitleSet) publicSession {
 	fullSummary := sessionSummary(session)
+	summaryMarkdown, summaryHTML := renderRichText(fullSummary)
+	openText := firstNonEmpty(session.LastAssistantMessageFull, session.LastAssistantMessage, session.LastUserPromptPreview)
+	openReason := ""
+	if session.State == model.StateAttention {
+		openReason = classifyOpenReason(openText)
+	}
 	item := publicSession{
-		SessionID:      session.SessionID,
-		ShortSessionID: shortSessionID(session.SessionID),
-		DisplayTitle:   titles.Display,
-		CompactTitle:   titles.Compact,
-		MicroTitle:     titles.Micro,
-		State:          session.State,
-		StateDetail:    session.StateDetail,
-		UpdatedAt:      session.UpdatedAt,
-		Summary:        fullSummary,
-		CompactSummary: compactSummary(fullSummary, false),
-		MicroSummary:   microSummary(fullSummary, false),
-		NeedsOpen:      session.State == model.StateAttention,
+		SessionID:       session.SessionID,
+		ShortSessionID:  shortSessionID(session.SessionID),
+		DisplayTitle:    titles.Display,
+		CompactTitle:    titles.Compact,
+		MicroTitle:      titles.Micro,
+		State:           session.State,
+		StateDetail:     session.StateDetail,
+		UpdatedAt:       session.UpdatedAt,
+		Summary:         fullSummary,
+		SummaryMarkdown: summaryMarkdown,
+		SummaryHTML:     summaryHTML,
+		CompactSummary:  compactSummary(fullSummary, false),
+		MicroSummary:    microSummary(fullSummary, false),
+		NeedsOpen:       session.State == model.StateAttention,
+		NeedsApproval:   openReason == "approval",
+		OpenReason:      openReason,
 	}
 
 	if notification.ID != "" {
 		item.OpenSummary = notification.Summary
+		item.OpenMarkdown, item.OpenHTML = renderRichText(notification.Summary)
 		item.CompactOpen = compactSummary(notification.Summary, true)
 		item.MicroOpen = microSummary(notification.Summary, true)
 		item.NeedsOpen = notification.Kind == model.NotificationAttention
+		item.OpenReason = classifyOpenReason(notification.Summary)
+		item.NeedsApproval = item.OpenReason == "approval"
 		item.CanContinue = slices.Contains(notification.Actions, model.NotificationActionContinue)
 		if item.CanContinue {
 			item.ContinueAction = &publicContinueAction{
@@ -402,17 +428,20 @@ func (s *Server) publicNotifications(items []model.NotificationSnapshot) []publi
 }
 
 func (s *Server) publicNotification(item model.NotificationSnapshot) publicNotification {
+	summaryMarkdown, summaryHTML := renderRichText(item.Summary)
 	return publicNotification{
-		ID:          item.ID,
-		SessionID:   item.SessionID,
-		Kind:        item.Kind,
-		State:       item.State,
-		Title:       item.Title,
-		Summary:     item.Summary,
-		CreatedAt:   item.CreatedAt,
-		UpdatedAt:   item.UpdatedAt,
-		ActionToken: item.ActionToken,
-		Actions:     item.Actions,
+		ID:              item.ID,
+		SessionID:       item.SessionID,
+		Kind:            item.Kind,
+		State:           item.State,
+		Title:           item.Title,
+		Summary:         item.Summary,
+		SummaryMarkdown: summaryMarkdown,
+		SummaryHTML:     summaryHTML,
+		CreatedAt:       item.CreatedAt,
+		UpdatedAt:       item.UpdatedAt,
+		ActionToken:     item.ActionToken,
+		Actions:         item.Actions,
 	}
 }
 
@@ -600,6 +629,53 @@ func sessionSummary(session model.SessionSnapshot) string {
 	return firstNonEmpty(session.LastAssistantMessage, session.LastBashCommand, session.LastUserPromptPreview)
 }
 
+func classifyOpenReason(message string) string {
+	if needsApprovalFromMessage(message) {
+		return "approval"
+	}
+	if strings.TrimSpace(message) != "" {
+		return "followup"
+	}
+	return ""
+}
+
+func needsApprovalFromMessage(message string) bool {
+	text := strings.ToLower(strings.TrimSpace(message))
+	if text == "" {
+		return false
+	}
+
+	approvalMarkers := []string{
+		"approval required",
+		"approve",
+		"approval",
+		"need approval",
+		"need confirmation",
+		"confirm ",
+		"confirmation",
+		"waiting for",
+		"before overwriting",
+		"before editing",
+		"before deleting",
+		"before proceeding",
+		"before continuing",
+		"continue after",
+		"please confirm",
+		"please approve",
+		"请确认",
+		"请批准",
+		"等待你确认",
+		"等你确认",
+	}
+	for _, marker := range approvalMarkers {
+		if strings.Contains(text, marker) {
+			return true
+		}
+	}
+
+	return false
+}
+
 func firstNonEmpty(values ...string) string {
 	for _, value := range values {
 		if strings.TrimSpace(value) != "" {
@@ -607,6 +683,215 @@ func firstNonEmpty(values ...string) string {
 		}
 	}
 	return ""
+}
+
+var markdownRenderer = goldmark.New(
+	goldmark.WithExtensions(extension.GFM),
+	goldmark.WithRendererOptions(gmhtml.WithHardWraps()),
+)
+
+func renderRichText(value string) (string, string) {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return "", ""
+	}
+	if containsANSIEscape(value) {
+		plain := stripANSIEscape(value)
+		return "```text\n" + plain + "\n```", ansiTextToHTML(value)
+	}
+	return value, markdownToHTML(value)
+}
+
+func markdownToHTML(value string) string {
+	if strings.TrimSpace(value) == "" {
+		return ""
+	}
+	var buf bytes.Buffer
+	if err := markdownRenderer.Convert([]byte(value), &buf); err != nil {
+		return "<p>" + html.EscapeString(value) + "</p>"
+	}
+	return strings.TrimSpace(buf.String())
+}
+
+func containsANSIEscape(value string) bool {
+	return strings.Contains(value, "\x1b[")
+}
+
+func stripANSIEscape(value string) string {
+	var out strings.Builder
+	for i := 0; i < len(value); i++ {
+		if value[i] != 0x1b || i+1 >= len(value) || value[i+1] != '[' {
+			out.WriteByte(value[i])
+			continue
+		}
+		i += 2
+		for i < len(value) {
+			ch := value[i]
+			if ch >= '@' && ch <= '~' {
+				break
+			}
+			i++
+		}
+	}
+	return strings.TrimSpace(strings.ReplaceAll(out.String(), "\r\n", "\n"))
+}
+
+func ansiTextToHTML(value string) string {
+	text := strings.ReplaceAll(value, "\r\n", "\n")
+	type styleState struct {
+		bold  bool
+		faint bool
+		color string
+	}
+	reset := func(state *styleState) {
+		*state = styleState{}
+	}
+	applyCode := func(state *styleState, code int) {
+		switch code {
+		case 0:
+			reset(state)
+		case 1:
+			state.bold = true
+		case 2:
+			state.faint = true
+		case 22:
+			state.bold = false
+			state.faint = false
+		case 30, 90:
+			state.color = "#94a3b8"
+		case 31, 91:
+			state.color = "#f87171"
+		case 32, 92:
+			state.color = "#4ade80"
+		case 33, 93:
+			state.color = "#fbbf24"
+		case 34, 94:
+			state.color = "#60a5fa"
+		case 35, 95:
+			state.color = "#c084fc"
+		case 36, 96:
+			state.color = "#22d3ee"
+		case 37, 97:
+			state.color = "#e5e7eb"
+		case 39:
+			state.color = ""
+		}
+	}
+	buildStyle := func(state styleState) string {
+		styles := make([]string, 0, 3)
+		if state.bold {
+			styles = append(styles, "font-weight:600")
+		}
+		if state.faint {
+			styles = append(styles, "opacity:0.7")
+		}
+		if state.color != "" {
+			styles = append(styles, "color:"+state.color)
+		}
+		return strings.Join(styles, ";")
+	}
+
+	var buf strings.Builder
+	buf.WriteString(`<pre class="terminal-output"><code>`)
+	state := styleState{}
+	openSpan := false
+	for i := 0; i < len(text); i++ {
+		if text[i] == 0x1b && i+1 < len(text) && text[i+1] == '[' {
+			j := i + 2
+			for j < len(text) {
+				ch := text[j]
+				if ch >= '@' && ch <= '~' {
+					break
+				}
+				j++
+			}
+			if j >= len(text) {
+				break
+			}
+			if text[j] == 'm' {
+				codes := strings.Split(text[i+2:j], ";")
+				if len(codes) == 1 && codes[0] == "" {
+					codes = []string{"0"}
+				}
+				next := state
+				for _, raw := range codes {
+					if raw == "" {
+						raw = "0"
+					}
+					switch raw {
+					case "0":
+						applyCode(&next, 0)
+					case "1":
+						applyCode(&next, 1)
+					case "2":
+						applyCode(&next, 2)
+					case "22":
+						applyCode(&next, 22)
+					case "30":
+						applyCode(&next, 30)
+					case "31":
+						applyCode(&next, 31)
+					case "32":
+						applyCode(&next, 32)
+					case "33":
+						applyCode(&next, 33)
+					case "34":
+						applyCode(&next, 34)
+					case "35":
+						applyCode(&next, 35)
+					case "36":
+						applyCode(&next, 36)
+					case "37":
+						applyCode(&next, 37)
+					case "39":
+						applyCode(&next, 39)
+					case "90":
+						applyCode(&next, 90)
+					case "91":
+						applyCode(&next, 91)
+					case "92":
+						applyCode(&next, 92)
+					case "93":
+						applyCode(&next, 93)
+					case "94":
+						applyCode(&next, 94)
+					case "95":
+						applyCode(&next, 95)
+					case "96":
+						applyCode(&next, 96)
+					case "97":
+						applyCode(&next, 97)
+					}
+				}
+				if openSpan {
+					buf.WriteString("</span>")
+					openSpan = false
+				}
+				state = next
+				if style := buildStyle(state); style != "" {
+					buf.WriteString(`<span style="` + style + `">`)
+					openSpan = true
+				}
+			}
+			i = j
+			continue
+		}
+		switch text[i] {
+		case '<':
+			buf.WriteString("&lt;")
+		case '>':
+			buf.WriteString("&gt;")
+		case '&':
+			buf.WriteString("&amp;")
+		default:
+			buf.WriteByte(text[i])
+		}
+	}
+	if openSpan {
+		buf.WriteString("</span>")
+	}
+	buf.WriteString(`</code></pre>`)
+	return buf.String()
 }
 
 func compactTitle(value string) string {
@@ -793,7 +1078,17 @@ var debugPageHTML = `<!doctype html>
     .session-main { min-width: 0; }
     .session-name { font-weight: 600; word-break: break-word; }
     .session-meta { margin-top: 4px; }
-    .session-summary { margin-top: 8px; color: #dbe6ff; white-space: pre-wrap; word-break: break-word; overflow-wrap: anywhere; }
+    .session-summary { margin-top: 8px; color: #dbe6ff; word-break: break-word; overflow-wrap: anywhere; }
+    .session-summary > :first-child { margin-top: 0; }
+    .session-summary > :last-child { margin-bottom: 0; }
+    .session-summary p { margin: 0 0 10px; }
+    .session-summary ul, .session-summary ol { margin: 0 0 10px 20px; padding: 0; }
+    .session-summary li { margin: 4px 0; }
+    .session-summary a { color: inherit; text-decoration: none; pointer-events: none; cursor: text; }
+    .session-summary code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; padding: 1px 5px; border-radius: 6px; background: #162033; color: #e2e8f0; }
+    .session-summary pre { margin: 8px 0 10px; padding: 12px 14px; overflow: auto; border-radius: 10px; border: 1px solid #2f3d5d; background: #0b1220; color: #dbe6ff; white-space: pre-wrap; }
+    .session-summary pre code { padding: 0; border-radius: 0; background: transparent; color: inherit; }
+    .session-summary .terminal-output { background: #0b1220; border-color: #2f3d5d; }
   </style>
 </head>
 <body>
@@ -824,6 +1119,15 @@ var debugPageHTML = `<!doctype html>
         .replaceAll('"', '&quot;')
         .replaceAll("'", '&#39;');
     }
+    function stripLinks(html) {
+      const template = document.createElement('template');
+      template.innerHTML = String(html || '');
+      template.content.querySelectorAll('a').forEach((link) => {
+        const text = document.createTextNode(link.textContent || '');
+        link.replaceWith(text);
+      });
+      return template.innerHTML;
+    }
     function normalizeState(value) {
       const state = String(value || '').toLowerCase();
       if (state === 'running_bash') return 'running';
@@ -852,9 +1156,11 @@ var debugPageHTML = `<!doctype html>
       snapshot.sessions.forEach((session) => {
         const title = session.display_title || session.short_session_id || session.session_id || 'unknown';
         const detail = session.open_summary || session.summary || '';
+        const detailHTML = stripLinks(session.open_summary_html || session.summary_html || '');
         const meta = [];
         if (session.short_session_id) meta.push(session.short_session_id);
         if (session.updated_at) meta.push(session.updated_at);
+        if (session.needs_approval) meta.push('approval pending');
         if (session.can_continue) meta.push('continue available');
         const el = document.createElement('div');
         el.className = 'session';
@@ -862,7 +1168,7 @@ var debugPageHTML = `<!doctype html>
           '<div class="session-main">',
           '  <div class="session-name">' + escapeHTML(title) + '</div>',
           '  <div class="muted session-meta">' + escapeHTML(meta.join(' · ')) + '</div>',
-          detail ? ('  <div class="session-summary">' + escapeHTML(detail) + '</div>') : '',
+          detailHTML ? ('  <div class="session-summary">' + detailHTML + '</div>') : (detail ? ('  <div class="session-summary">' + escapeHTML(detail) + '</div>') : ''),
           '</div>',
           '<span class="status status-' + normalizeState(session.state) + '">' + normalizeState(session.state) + '</span>'
         ].join('');

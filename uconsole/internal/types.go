@@ -23,6 +23,8 @@ type SessionResponse struct {
 	UpdatedAt        time.Time              `json:"updated_at,omitempty"`
 	Summary          string                 `json:"summary,omitempty"`
 	NeedsOpen        bool                   `json:"needs_open,omitempty"`
+	NeedsApproval    bool                   `json:"needs_approval,omitempty"`
+	OpenReason       string                 `json:"open_reason,omitempty"`
 	OpenSummary      string                 `json:"open_summary,omitempty"`
 	CanContinue      bool                   `json:"can_continue,omitempty"`
 	ContinueAction   *ContinueActionPayload `json:"continue_action,omitempty"`

@@ -80,6 +80,12 @@ func TestStatusIncludesOpenSummaryAndContinueAction(t *testing.T) {
 	if session.OpenSummary != "Need confirmation before overwriting files" {
 		t.Fatalf("unexpected open summary: %q", session.OpenSummary)
 	}
+	if session.OpenMarkdown != "Need confirmation before overwriting files" {
+		t.Fatalf("unexpected open markdown: %q", session.OpenMarkdown)
+	}
+	if !strings.Contains(session.OpenHTML, "<p>Need confirmation before overwriting files</p>") {
+		t.Fatalf("expected rendered open html, got %q", session.OpenHTML)
+	}
 	if session.CompactOpen != "Need confirmation before overwriting files" {
 		t.Fatalf("unexpected compact open summary: %q", session.CompactOpen)
 	}
@@ -88,6 +94,12 @@ func TestStatusIncludesOpenSummaryAndContinueAction(t *testing.T) {
 	}
 	if !session.NeedsOpen {
 		t.Fatalf("expected session to need open follow-up")
+	}
+	if !session.NeedsApproval {
+		t.Fatalf("expected approval state to be visible")
+	}
+	if session.OpenReason != "approval" {
+		t.Fatalf("expected approval open reason, got %q", session.OpenReason)
 	}
 	if !session.CanContinue {
 		t.Fatalf("expected session to be continuable")
@@ -150,6 +162,15 @@ func TestOpenSummaryPreservesFullAssistantReply(t *testing.T) {
 	if session.OpenSummary != fullReply {
 		t.Fatalf("expected full open summary, got %q", session.OpenSummary)
 	}
+	if !strings.Contains(session.OpenHTML, "<p>") {
+		t.Fatalf("expected open html paragraphs, got %q", session.OpenHTML)
+	}
+	if session.NeedsApproval {
+		t.Fatalf("expected non-approval follow-up to stay visible without approval flag")
+	}
+	if session.OpenReason != "followup" {
+		t.Fatalf("expected followup open reason, got %q", session.OpenReason)
+	}
 	if len([]rune(fullReply)) <= 160 {
 		t.Fatalf("expected test fixture to exceed preview length, got %d", len([]rune(fullReply)))
 	}
@@ -185,6 +206,42 @@ func TestEmptyStatusIsIdleWhenServerIsReachable(t *testing.T) {
 	}
 	if out.SessionsCount != 0 {
 		t.Fatalf("expected zero sessions, got %d", out.SessionsCount)
+	}
+}
+
+func TestRenderRichTextConvertsANSIToMarkdownAndHTML(t *testing.T) {
+	raw := "build failed\n\x1b[31mERROR\x1b[0m: listen EPERM"
+	markdown, html := renderRichText(raw)
+
+	if !strings.HasPrefix(markdown, "```text\n") {
+		t.Fatalf("expected ansi markdown to become fenced code block, got %q", markdown)
+	}
+	if strings.Contains(markdown, "\x1b[") {
+		t.Fatalf("expected ansi markdown to strip escape sequences, got %q", markdown)
+	}
+	if !strings.Contains(html, `class="terminal-output"`) {
+		t.Fatalf("expected terminal html wrapper, got %q", html)
+	}
+	if !strings.Contains(html, "ERROR") {
+		t.Fatalf("expected terminal html content, got %q", html)
+	}
+	if !strings.Contains(html, "color:#f87171") {
+		t.Fatalf("expected ansi color style in html, got %q", html)
+	}
+}
+
+func TestRenderRichTextConvertsMarkdownToHTML(t *testing.T) {
+	raw := "先看 `server.go`。\n\n需要去 [status 页](/status) 再确认。"
+	markdown, html := renderRichText(raw)
+
+	if markdown != raw {
+		t.Fatalf("expected markdown text to stay unchanged, got %q", markdown)
+	}
+	if !strings.Contains(html, "<code>server.go</code>") {
+		t.Fatalf("expected inline code to render, got %q", html)
+	}
+	if !strings.Contains(html, `<a href="/status">status 页</a>`) {
+		t.Fatalf("expected markdown link to render, got %q", html)
 	}
 }
 
@@ -239,6 +296,12 @@ func TestStatusTitleDoesNotReuseAssistantSummary(t *testing.T) {
 	}
 	if session.OpenSummary != "Approval required before editing billing rules" {
 		t.Fatalf("unexpected open summary: %q", session.OpenSummary)
+	}
+	if !session.NeedsApproval {
+		t.Fatalf("expected approval message to expose approval state")
+	}
+	if session.OpenReason != "approval" {
+		t.Fatalf("expected approval open reason, got %q", session.OpenReason)
 	}
 }
 
