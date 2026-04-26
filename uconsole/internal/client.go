@@ -118,6 +118,62 @@ func (c *Client) ContinueNotification(ctx context.Context, item NotificationResp
 	return nil
 }
 
+func (c *Client) ContinueSession(ctx context.Context, session SessionResponse) error {
+	action := session.ContinueAction
+	if action == nil {
+		return fmt.Errorf("session continue is unavailable")
+	}
+
+	endpoint := strings.TrimSpace(action.Endpoint)
+	if endpoint == "" {
+		return fmt.Errorf("session continue endpoint is missing")
+	}
+	method := strings.ToUpper(strings.TrimSpace(action.Method))
+	if method == "" {
+		method = http.MethodPost
+	}
+
+	targetURL, err := c.resolveURL(endpoint)
+	if err != nil {
+		return err
+	}
+
+	payload, err := json.Marshal(map[string]string{
+		"action_token": strings.TrimSpace(action.ActionToken),
+	})
+	if err != nil {
+		return err
+	}
+
+	req, err := http.NewRequestWithContext(ctx, method, targetURL, bytes.NewReader(payload))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 2048))
+		return fmt.Errorf("session continue failed: %s: %s", resp.Status, strings.TrimSpace(string(body)))
+	}
+	return nil
+}
+
+func (c *Client) resolveURL(endpoint string) (string, error) {
+	base, err := url.Parse(c.baseURL + "/")
+	if err != nil {
+		return "", err
+	}
+	ref, err := url.Parse(endpoint)
+	if err != nil {
+		return "", err
+	}
+	return base.ResolveReference(ref).String(), nil
+}
+
 func (c *Client) StreamStatus(ctx context.Context, onStatus func(StatusResponse)) error {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+"/v1/stream", nil)
 	if err != nil {

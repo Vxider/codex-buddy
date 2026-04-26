@@ -154,7 +154,7 @@ func Default() Config {
 			HTTPTimeoutMS:    3000,
 			ReconnectDelayMS: 3000,
 			PollFallbackMS:   10000,
-			ContinueHoldMS:   800,
+			ContinueHoldMS:   1000,
 			Window: UConsoleWindowConfig{
 				Width:      920,
 				Height:     540,
@@ -213,7 +213,7 @@ func applyDefaults(cfg *Config) {
 		cfg.UConsole.PollFallbackMS = 10000
 	}
 	if cfg.UConsole.ContinueHoldMS <= 0 {
-		cfg.UConsole.ContinueHoldMS = 800
+		cfg.UConsole.ContinueHoldMS = 1000
 	}
 	if cfg.UConsole.Window.Width <= 0 {
 		cfg.UConsole.Window.Width = 920

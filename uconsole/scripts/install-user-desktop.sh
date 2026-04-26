@@ -15,10 +15,6 @@ ICON_TARGET="${ICON_DIR}/codex-buddy-uconsole.png"
 DESKTOP_FILE="${APP_DIR}/codex-buddy-uconsole.desktop"
 DESKTOP_COPY="${HOME}/Desktop/codex-buddy-uconsole.desktop"
 
-if [[ ! -x "${BIN_SOURCE}" ]]; then
-  echo "error: binary not found: ${BIN_SOURCE}" >&2
-  exit 1
-fi
 if [[ ! -f "${ICON_SOURCE}" ]]; then
   echo "error: icon not found: ${ICON_SOURCE}" >&2
   exit 1
@@ -29,8 +25,18 @@ if [[ ! -f "${DESKTOP_TEMPLATE}" ]]; then
 fi
 
 mkdir -p "${HOME}/.local/bin" "${APP_DIR}" "${ICON_DIR}"
-cp "${BIN_SOURCE}" "${BIN_TARGET}"
-chmod +x "${BIN_TARGET}"
+
+if [[ -x "${BIN_TARGET}" ]]; then
+  BIN_INSTALL_SOURCE="${BIN_TARGET}"
+elif [[ -x "${BIN_SOURCE}" ]]; then
+  BIN_INSTALL_SOURCE="${BIN_SOURCE}"
+  cp "${BIN_SOURCE}" "${BIN_TARGET}"
+  chmod +x "${BIN_TARGET}"
+else
+  echo "error: binary not found: ${BIN_TARGET} or ${BIN_SOURCE}" >&2
+  exit 1
+fi
+
 cp "${ICON_SOURCE}" "${ICON_TARGET}"
 
 escape_sed_replacement() {
@@ -55,6 +61,7 @@ if [[ -d "${HOME}/Desktop" ]]; then
 fi
 
 echo "Installed binary: ${BIN_TARGET}"
+echo "Binary source: ${BIN_INSTALL_SOURCE}"
 echo "Installed icon: ${ICON_TARGET}"
 echo "Installed launcher: ${DESKTOP_FILE}"
 if [[ -f "${DESKTOP_COPY}" ]]; then
