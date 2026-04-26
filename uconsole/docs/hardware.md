@@ -35,42 +35,41 @@ The hardware integration should stay pragmatic:
 
 Recommended default LED assumptions:
 
-- `GPIO40`
+- `GPIO45`
 - `8 x WS2812`
 - modest brightness suitable for handheld indoor use
 
-On the uConsole 4G blank expansion board, `GPIO40` maps to `J1 / uConsoleEXT pin 42`.
-It sits on the even-numbered side of the expansion connector, between `GPIO39` (`pin 40`)
-and `GPIO41` (`pin 44`).
+On the uConsole 4G blank expansion board, `GPIO45` maps to `J1 / uConsoleEXT pin 52`.
+It sits at the end of the even-numbered side of the expansion connector.
 
 Quick lookup around the target pad, using connector numbering only:
 
 ```text
 J1 / uConsoleEXT, even-numbered side
 
-pin 38 -> GPIO38
-pin 40 -> GPIO39
-pin 42 -> GPIO40   <- WS2812 DIN
 pin 44 -> GPIO41
-pin 46 -> GPIO42
+pin 46 -> GPIO42   <- do not use
+pin 48 -> GPIO43
+pin 50 -> GPIO44
+pin 52 -> GPIO45   <- WS2812 DIN
 ```
 
-If the blank board has no clear silkscreen, count along the even-numbered pad row and use
-the pad between `GPIO39` and `GPIO41`.
+If the blank board has no clear silkscreen, count to the last pad on the even-numbered row
+and use `pin 52 / GPIO45`.
 
 Minimal wiring view for the WS2812 data line:
 
 ```text
 4G blank board (J1 / uConsoleEXT, even side)
 
-... [pin 38] [pin 40] [pin 42] [pin 44] [pin 46] ...
-... GPIO38   GPIO39   GPIO40   GPIO41   GPIO42   ...
-                       |
-                       +---- DIN -> WS2812 input
+... [pin 44] [pin 46] [pin 48] [pin 50] [pin 52] ...
+... GPIO41   GPIO42   GPIO43   GPIO44   GPIO45   ...
+                                             |
+                                             +---- DIN -> WS2812 input
 ```
 
 Power the LED strip separately from the board's `5V` and `GND`, and share ground with the
-data line. The only signal pad that must be exact here is `GPIO40 / pin 42`.
+data line. The only signal pad that must be exact here is `GPIO45 / pin 52`.
 
 Suggested visual mapping:
 

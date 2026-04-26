@@ -164,7 +164,7 @@ func Default() Config {
 				Enabled:    true,
 				Pixels:     8,
 				Brightness: 40,
-				GPIOPin:    40,
+				GPIOPin:    45,
 				DmaNum:     10,
 				Frequency:  800000,
 			},
@@ -228,7 +228,7 @@ func applyDefaults(cfg *Config) {
 		cfg.UConsole.LED.Brightness = 40
 	}
 	if cfg.UConsole.LED.GPIOPin <= 0 {
-		cfg.UConsole.LED.GPIOPin = 40
+		cfg.UConsole.LED.GPIOPin = 45
 	}
 	if cfg.UConsole.LED.DmaNum <= 0 {
 		cfg.UConsole.LED.DmaNum = 10

@@ -149,7 +149,7 @@ The `uconsole` config block currently includes:
 - `led.dma_num`
 - `led.frequency`
 
-The recommended default LED setup for a CM5-based uConsole 4G blank board is `GPIO40 + 8 x WS2812`.
+The recommended default LED setup for a CM5-based uConsole 4G blank board is `GPIO45 / pin 52 + 8 x WS2812`.
 
 ## Documentation
 
