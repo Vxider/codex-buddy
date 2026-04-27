@@ -4,8 +4,8 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	"io"
 	"log"
-	"os"
 
 	"github.com/vxider/codex-buddy/cli"
 	"github.com/vxider/codex-buddy/internal/config"
@@ -33,9 +33,9 @@ func runCLI(args []string) int {
 		cfg.UConsole.ServerURL = serverURL
 	}
 
-	logger := log.New(os.Stdout, "codex-buddy-cli: ", log.LstdFlags|log.Lmsgprefix)
+	logger := log.New(io.Discard, "", 0)
 	if err := cli.Run(context.Background(), cfg, resolvedConfigPath, logger); err != nil {
-		logger.Printf("cli failed: %v", err)
+		fmt.Printf("cli failed: %v\n", err)
 		return 1
 	}
 	return 0

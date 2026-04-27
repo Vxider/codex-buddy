@@ -1,7 +1,6 @@
 package cli
 
 import (
-	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -113,12 +112,22 @@ type serverSnapshot struct {
 }
 
 type App struct {
-	cfg        config.Config
-	configPath string
-	logger     *log.Logger
-	runtime    *engine.Runtime
-	server     *engine.EmbeddedServer
-	reader     *bufio.Reader
+	cfg         config.Config
+	configPath  string
+	logger      *log.Logger
+	runtime     *engine.Runtime
+	server      *engine.EmbeddedServer
+	snapshots   []serverSnapshot
+	lastRefresh time.Time
+	activePane  tuiPane
+
+	selectedOpenSessionIndex  int
+	selectedServerIndex       int
+	selectedSessionIndex      int
+	selectedNotificationIndex int
+
+	flash      string
+	flashUntil time.Time
 }
 
 func Run(ctx context.Context, cfg config.Config, configPath string, logger *log.Logger) error {
@@ -130,7 +139,6 @@ func Run(ctx context.Context, cfg config.Config, configPath string, logger *log.
 		configPath: configPath,
 		logger:     logger,
 		runtime:    engine.NewRuntime(cfg, logger),
-		reader:     bufio.NewReader(os.Stdin),
 	}
 	app.runtime.Start(ctx)
 	app.server = engine.NewEmbeddedServer(app.runtime, cfg, logger)
@@ -139,30 +147,7 @@ func Run(ctx context.Context, cfg config.Config, configPath string, logger *log.
 			logger.Printf("local server start failed: %v", err)
 		}
 	}
-
-	for {
-		rendered, err := app.render(ctx)
-		if err != nil {
-			return err
-		}
-		fmt.Print(rendered)
-		fmt.Print("\ncmd> ")
-		line, err := app.reader.ReadString('\n')
-		if err != nil {
-			if err == io.EOF {
-				return nil
-			}
-			return err
-		}
-		line = strings.TrimSpace(line)
-		if line == "" || strings.EqualFold(line, "r") || strings.EqualFold(line, "refresh") {
-			continue
-		}
-		if err := app.handleCommand(ctx, line); err != nil {
-			fmt.Printf("\nerror: %v\n", err)
-			time.Sleep(1200 * time.Millisecond)
-		}
-	}
+	return app.runTUI(ctx)
 }
 
 func (a *App) render(ctx context.Context) (string, error) {

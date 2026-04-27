@@ -8,15 +8,13 @@ Usage:
 
 Options:
   --ws281x            Build with the WS2812 hardware driver (`ws281x`)
-  --output PATH       Install destination (default: ~/.local/bin/codex-buddy)
-  --restart-service   Restart `codex-buddy.service` after install
+  --output PATH       Install destination (default: ~/.local/bin/codex-buddy-uconsole)
   --dry-run           Print the resolved build/install plan without writing files
   -h, --help          Show this help
 
 Examples:
   ./uconsole/scripts/build-install.sh
   ./uconsole/scripts/build-install.sh --ws281x
-  ./uconsole/scripts/build-install.sh --ws281x --restart-service
 EOF
 }
 
@@ -29,9 +27,8 @@ if [[ ! -d "${GO_HOME_BASE}" || ! -w "${GO_HOME_BASE}" ]]; then
 fi
 
 ENABLE_WS281X=0
-RESTART_SERVICE=0
 DRY_RUN=0
-INSTALL_PATH="${HOME}/.local/bin/codex-buddy"
+INSTALL_PATH="${HOME}/.local/bin/codex-buddy-uconsole"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -46,10 +43,6 @@ while [[ $# -gt 0 ]]; do
       fi
       INSTALL_PATH="$2"
       shift 2
-      ;;
-    --restart-service)
-      RESTART_SERVICE=1
-      shift
       ;;
     --dry-run)
       DRY_RUN=1
@@ -97,21 +90,11 @@ if [[ "${ENABLE_WS281X}" -eq 1 ]]; then
   TAGS+=("ws281x")
 fi
 
-SERVICE_PATH="${HOME}/.config/systemd/user/codex-buddy.service"
-SHOULD_RESTART=0
-if [[ "${RESTART_SERVICE}" -eq 1 && -f "${SERVICE_PATH}" ]] && command -v systemctl >/dev/null 2>&1; then
-  SHOULD_RESTART=1
-fi
-
 echo "==> codex-buddy uconsole build + install"
 echo "repo: ${REPO_ROOT}"
 echo "install: ${INSTALL_PATH}"
 echo "tags: ${TAGS[*]}"
-if [[ "${SHOULD_RESTART}" -eq 1 ]]; then
-  echo "service: codex-buddy.service will be restarted"
-else
-  echo "service: no restart"
-fi
+echo "service: n/a (GUI app)"
 
 if [[ "${DRY_RUN}" -eq 1 ]]; then
   exit 0
@@ -126,18 +109,12 @@ trap 'rm -f -- "${TMP_BIN}" "${TMP_INSTALL}"' EXIT
 echo "==> building"
 (
   cd "${REPO_ROOT}"
-  go build -tags "$(IFS=' '; printf '%s' "${TAGS[*]}")" -o "${TMP_BIN}" ./cmd/codex-buddy
+  go build -tags "$(IFS=' '; printf '%s' "${TAGS[*]}")" -o "${TMP_BIN}" ./cmd/codex-buddy-uconsole
 )
 
 echo "==> installing"
 install -m 0755 "${TMP_BIN}" "${TMP_INSTALL}"
 mv "${TMP_INSTALL}" "${INSTALL_PATH}"
-
-if [[ "${SHOULD_RESTART}" -eq 1 ]]; then
-  echo "==> restarting service"
-  systemctl --user daemon-reload
-  systemctl --user restart codex-buddy.service
-fi
 
 echo "==> done"
 echo "binary: ${INSTALL_PATH}"

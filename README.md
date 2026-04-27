@@ -16,9 +16,11 @@ The repository currently contains three tracks:
   - Reads Codex hook events from `stdin` and forwards them to the local daemon
 - `codex-buddy status`
   - Prints the current aggregate status, optionally as JSON
-- `codex-buddy uconsole`
+- `codex-buddy-uconsole`
   - Starts the native uConsole companion GUI
   - Connects to a local or remote `codex-buddy` server over HTTP/SSE and supports attention/error cards, acknowledge, continue, and LED state rendering
+- `codex-buddy uconsole`
+  - Compatibility entrypoint for the same GUI app
 
 ## Build
 
@@ -51,7 +53,7 @@ Notes:
 - `uconsole/scripts/build-install.sh`
   - Builds the GUI-enabled uConsole variant with the `uconsole_gui` tag
   - Accepts `--ws281x` for real hardware LED output
-  - Installs by default without restarting services unless `--restart-service` is specified
+  - Installs to `~/.local/bin/codex-buddy-uconsole` by default
 
 Manual builds are also supported.
 
@@ -65,13 +67,13 @@ go build -o ~/.local/bin/codex-buddy ./cmd/codex-buddy
 Native uConsole GUI build:
 
 ```bash
-go build -tags uconsole_gui -o ~/.local/bin/codex-buddy ./cmd/codex-buddy
+go build -tags uconsole_gui -o ~/.local/bin/codex-buddy-uconsole ./cmd/codex-buddy-uconsole
 ```
 
 Native uConsole GUI build with Raspberry Pi WS2812 output:
 
 ```bash
-go build -tags 'uconsole_gui ws281x' -o ~/.local/bin/codex-buddy ./cmd/codex-buddy
+go build -tags 'uconsole_gui ws281x' -o ~/.local/bin/codex-buddy-uconsole ./cmd/codex-buddy-uconsole
 ```
 
 Notes:
@@ -106,22 +108,22 @@ codex-buddy status
 Connect to the local default server at `http://127.0.0.1:8787`:
 
 ```bash
-codex-buddy uconsole
+codex-buddy-uconsole
 ```
 
 Connect to a remote `codex-buddy` server:
 
 ```bash
-codex-buddy uconsole --server-url http://<codex-host>:8787
+codex-buddy-uconsole --server-url http://<codex-host>:8787
 ```
 
 Disable LEDs for local debugging:
 
 ```bash
-codex-buddy uconsole --no-led
+codex-buddy-uconsole --no-led
 ```
 
-If the current binary does not include the GUI, the command will tell you to rebuild with `-tags uconsole_gui`.
+`codex-buddy uconsole` remains available as a compatibility command. If the current binary does not include the GUI, the command will tell you to rebuild with `-tags uconsole_gui`.
 
 ## Configuration
 

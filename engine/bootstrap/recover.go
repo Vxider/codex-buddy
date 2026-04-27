@@ -102,8 +102,11 @@ func RecoverOpenSessions(logger *log.Logger) ([]Session, error) {
 
 func listCodexPanes() ([]pane, error) {
 	cmd := exec.Command("tmux", "list-panes", "-a", "-F", "#{session_name}\t#{window_id}\t#{pane_id}\t#{pane_pid}\t#{pane_dead}\t#{pane_current_command}\t#{pane_current_path}")
-	output, err := cmd.Output()
+	output, err := cmd.CombinedOutput()
 	if err != nil {
+		if tmuxUnavailable(string(output)) {
+			return nil, nil
+		}
 		return nil, fmt.Errorf("list tmux panes: %w", err)
 	}
 
@@ -127,6 +130,25 @@ func listCodexPanes() ([]pane, error) {
 		return nil, err
 	}
 	return panes, nil
+}
+
+func tmuxUnavailable(output string) bool {
+	text := strings.ToLower(strings.TrimSpace(output))
+	if text == "" {
+		return false
+	}
+
+	markers := []string{
+		"failed to connect to server",
+		"no server running",
+		"no sessions",
+	}
+	for _, marker := range markers {
+		if strings.Contains(text, marker) {
+			return true
+		}
+	}
+	return false
 }
 
 func parsePaneLine(line string) (pane, bool) {
