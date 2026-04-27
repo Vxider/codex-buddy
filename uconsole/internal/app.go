@@ -245,28 +245,30 @@ func (l sessionGridLayout) Layout(objects []fyne.CanvasObject, size fyne.Size) {
 		cellWidth = 0
 	}
 
-	x := float32(0)
 	y := float32(0)
-	rowHeight := float32(0)
-	col := 0
 
-	for _, obj := range visible {
-		objHeight := obj.MinSize().Height
-		obj.Move(fyne.NewPos(x, y))
-		obj.Resize(fyne.NewSize(cellWidth, objHeight))
-		if objHeight > rowHeight {
-			rowHeight = objHeight
+	for start := 0; start < len(visible); start += cols {
+		end := start + cols
+		if end > len(visible) {
+			end = len(visible)
 		}
 
-		col++
-		if col >= cols {
-			col = 0
-			x = 0
-			y += rowHeight + gap
-			rowHeight = 0
-			continue
+		row := visible[start:end]
+		rowHeight := float32(0)
+		for _, obj := range row {
+			if objHeight := obj.MinSize().Height; objHeight > rowHeight {
+				rowHeight = objHeight
+			}
 		}
-		x += cellWidth + gap
+
+		x := float32(0)
+		for _, obj := range row {
+			obj.Move(fyne.NewPos(x, y))
+			obj.Resize(fyne.NewSize(cellWidth, rowHeight))
+			x += cellWidth + gap
+		}
+
+		y += rowHeight + gap
 	}
 }
 
@@ -279,15 +281,32 @@ func (l sessionGridLayout) MinSize(objects []fyne.CanvasObject) fyne.Size {
 	width := float32(0)
 	height := float32(0)
 	gap := l.spacing()
-	for i, obj := range visible {
-		min := obj.MinSize()
-		if min.Width > width {
-			width = min.Width
+	cols := l.columns(width, len(visible))
+	if cols < 1 {
+		cols = 1
+	}
+
+	for start := 0; start < len(visible); start += cols {
+		end := start + cols
+		if end > len(visible) {
+			end = len(visible)
 		}
-		height += min.Height
-		if i > 0 {
+
+		rowHeight := float32(0)
+		for _, obj := range visible[start:end] {
+			min := obj.MinSize()
+			if min.Width > width {
+				width = min.Width
+			}
+			if min.Height > rowHeight {
+				rowHeight = min.Height
+			}
+		}
+
+		if start > 0 {
 			height += gap
 		}
+		height += rowHeight
 	}
 	return fyne.NewSize(width, height)
 }
@@ -3216,7 +3235,20 @@ func sessionRow(session SessionResponse, darkMode bool) fyne.CanvasObject {
 }
 
 func sessionCell(session SessionResponse, darkMode bool) fyne.CanvasObject {
-	return container.NewPadded(sessionRow(session, darkMode))
+	return container.NewBorder(
+		nil,
+		sessionListDivider(darkMode),
+		nil,
+		nil,
+		container.NewPadded(sessionRow(session, darkMode)),
+	)
+}
+
+func sessionListDivider(darkMode bool) fyne.CanvasObject {
+	lineColor := cardBorder(darkMode, false)
+	line := canvas.NewRectangle(lineColor)
+	line.SetMinSize(fyne.NewSize(0, 2))
+	return container.NewPadded(line)
 }
 
 func stateBadge(state model.State) fyne.CanvasObject {

@@ -117,9 +117,11 @@ if [[ "${DRY_RUN}" -eq 1 ]]; then
   exit 0
 fi
 
-mkdir -p "$(dirname -- "${INSTALL_PATH}")"
+INSTALL_DIR="$(dirname -- "${INSTALL_PATH}")"
+mkdir -p "${INSTALL_DIR}"
 TMP_BIN="$(mktemp "${TMPDIR:-/tmp}/codex-buddy.uconsole.XXXXXX")"
-trap 'rm -f -- "${TMP_BIN}"' EXIT
+TMP_INSTALL="${INSTALL_DIR}/.codex-buddy.install.$$"
+trap 'rm -f -- "${TMP_BIN}" "${TMP_INSTALL}"' EXIT
 
 echo "==> building"
 (
@@ -128,8 +130,8 @@ echo "==> building"
 )
 
 echo "==> installing"
-cp "${TMP_BIN}" "${INSTALL_PATH}"
-chmod +x "${INSTALL_PATH}"
+install -m 0755 "${TMP_BIN}" "${TMP_INSTALL}"
+mv "${TMP_INSTALL}" "${INSTALL_PATH}"
 
 if [[ "${SHOULD_RESTART}" -eq 1 ]]; then
   echo "==> restarting service"
