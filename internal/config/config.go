@@ -9,13 +9,15 @@ import (
 )
 
 type Config struct {
-	Listen     ListenConfig     `json:"listen"`
-	Internal   InternalConfig   `json:"internal"`
-	State      StateConfig      `json:"state"`
-	Transcript TranscriptConfig `json:"transcript"`
-	HookClient HookClientConfig `json:"hook_client"`
-	AppServer  AppServerConfig  `json:"app_server"`
-	UConsole   UConsoleConfig   `json:"uconsole"`
+	Listen        ListenConfig         `json:"listen"`
+	Internal      InternalConfig       `json:"internal"`
+	State         StateConfig          `json:"state"`
+	Transcript    TranscriptConfig     `json:"transcript"`
+	HookClient    HookClientConfig     `json:"hook_client"`
+	AppServer     AppServerConfig      `json:"app_server"`
+	LocalServer   LocalServerConfig    `json:"local_server"`
+	RemoteServers []RemoteServerConfig `json:"remote_servers,omitempty"`
+	UConsole      UConsoleConfig       `json:"uconsole"`
 }
 
 type ListenConfig struct {
@@ -48,6 +50,16 @@ type AppServerConfig struct {
 	Command          []string         `json:"command"`
 	RequestTimeoutMS int              `json:"request_timeout_ms"`
 	ClientInfo       ClientInfoConfig `json:"client_info"`
+}
+
+type LocalServerConfig struct {
+	Enabled bool `json:"enabled"`
+}
+
+type RemoteServerConfig struct {
+	ID      string `json:"id"`
+	Name    string `json:"name"`
+	BaseURL string `json:"base_url"`
 }
 
 type ClientInfoConfig struct {
@@ -105,6 +117,28 @@ func Load(path string) (Config, error) {
 	return cfg, nil
 }
 
+func Save(path string, cfg Config) error {
+	resolved, err := ResolvePath(path)
+	if err != nil {
+		return err
+	}
+
+	applyDefaults(&cfg)
+	data, err := json.MarshalIndent(cfg, "", "  ")
+	if err != nil {
+		return fmt.Errorf("encode config: %w", err)
+	}
+	data = append(data, '\n')
+
+	if err := os.MkdirAll(filepath.Dir(resolved), 0o755); err != nil {
+		return fmt.Errorf("create config dir: %w", err)
+	}
+	if err := os.WriteFile(resolved, data, 0o600); err != nil {
+		return fmt.Errorf("write config: %w", err)
+	}
+	return nil
+}
+
 func ResolvePath(path string) (string, error) {
 	if path != "" {
 		return path, nil
@@ -148,6 +182,9 @@ func Default() Config {
 				Title:   "codex-buddy Debug Client",
 				Version: "0.1.0",
 			},
+		},
+		LocalServer: LocalServerConfig{
+			Enabled: false,
 		},
 		UConsole: UConsoleConfig{
 			ServerURL:        "http://127.0.0.1:8787",

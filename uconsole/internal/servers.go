@@ -10,17 +10,26 @@ import (
 	"time"
 
 	"fyne.io/fyne/v2"
+
+	"github.com/vxider/codex-buddy/internal/config"
 )
 
-const serversPreferenceKey = "uconsoleServers"
+const (
+	serversPreferenceKey = "uconsoleServers"
+	localServerID        = "local"
+)
 
 type BuddyServer struct {
 	ID      string `json:"id"`
 	Name    string `json:"name"`
 	BaseURL string `json:"base_url"`
+	BuiltIn bool   `json:"-"`
 }
 
 func (s BuddyServer) DisplayName() string {
+	if s.IsLocal() {
+		return "Local"
+	}
 	if name := strings.TrimSpace(s.Name); name != "" {
 		return name
 	}
@@ -30,63 +39,110 @@ func (s BuddyServer) DisplayName() string {
 	return strings.TrimSpace(s.BaseURL)
 }
 
-func loadServers(prefs fyne.Preferences, fallbackURL string) []BuddyServer {
+func (s BuddyServer) IsLocal() bool {
+	return s.BuiltIn && s.ID == localServerID
+}
+
+func configuredServersFromConfig(cfg config.Config, prefs fyne.Preferences) []BuddyServer {
+	localBaseURL := strings.TrimRight(cfg.InternalBaseURL(), "/")
+	normalized := normalizeRemoteServers(cfg.RemoteServers)
+	if len(normalized) > 0 {
+		return normalized
+	}
+
+	migrated := migrateLegacyServers(prefs, cfg.UConsole.ServerURL, localBaseURL)
+	if len(migrated) > 0 {
+		return migrated
+	}
+	return seedServers(cfg.UConsole.ServerURL, localBaseURL)
+}
+
+func localServer() BuddyServer {
+	return BuddyServer{
+		ID:      localServerID,
+		Name:    "Local",
+		BaseURL: strings.TrimRight(config.Default().InternalBaseURL(), "/"),
+		BuiltIn: true,
+	}
+}
+
+func normalizeRemoteServers(items []config.RemoteServerConfig) []BuddyServer {
+	out := make([]BuddyServer, 0, len(items))
+	seen := make(map[string]int, len(items))
+	for _, server := range items {
+		baseURL, err := normalizedBaseURL(server.BaseURL)
+		if err != nil {
+			continue
+		}
+		id := strings.TrimSpace(server.ID)
+		if id == "" || id == localServerID {
+			id = newServerID()
+		}
+		item := BuddyServer{
+			ID:      id,
+			Name:    normalizedServerName(server.Name, baseURL),
+			BaseURL: baseURL,
+		}
+		if index, ok := seen[item.BaseURL]; ok {
+			out[index] = item
+			continue
+		}
+		seen[item.BaseURL] = len(out)
+		out = append(out, item)
+	}
+	return out
+}
+
+func migrateLegacyServers(prefs fyne.Preferences, fallbackURL string, localBaseURL string) []BuddyServer {
 	if prefs == nil {
-		return seedServers(fallbackURL)
+		return nil
 	}
 
 	raw := prefs.StringWithFallback(serversPreferenceKey, "")
 	if strings.TrimSpace(raw) == "" {
-		servers := seedServers(fallbackURL)
-		saveServers(prefs, servers)
-		return servers
+		return nil
 	}
 
 	var servers []BuddyServer
 	if err := json.Unmarshal([]byte(raw), &servers); err != nil {
-		servers = seedServers(fallbackURL)
-		saveServers(prefs, servers)
-		return servers
+		return seedServers(fallbackURL, localBaseURL)
 	}
 
-	normalized := make([]BuddyServer, 0, len(servers))
+	out := make([]BuddyServer, 0, len(servers))
 	for _, server := range servers {
 		baseURL, err := normalizedBaseURL(server.BaseURL)
 		if err != nil {
 			continue
 		}
 		id := strings.TrimSpace(server.ID)
-		if id == "" {
+		if id == "" || id == localServerID {
 			id = newServerID()
 		}
-		normalized = append(normalized, BuddyServer{
+		out = append(out, BuddyServer{
 			ID:      id,
 			Name:    normalizedServerName(server.Name, baseURL),
 			BaseURL: baseURL,
 		})
 	}
-
-	if len(normalized) == 0 {
-		normalized = seedServers(fallbackURL)
+	if len(out) == 0 {
+		return seedServers(fallbackURL, localBaseURL)
 	}
-	saveServers(prefs, normalized)
-	return normalized
+	return dedupeServers(out)
 }
 
-func saveServers(prefs fyne.Preferences, servers []BuddyServer) {
+func persistLegacyServersClear(prefs fyne.Preferences) {
 	if prefs == nil {
 		return
 	}
-	data, err := json.Marshal(servers)
-	if err != nil {
-		return
-	}
-	prefs.SetString(serversPreferenceKey, string(data))
+	prefs.SetString(serversPreferenceKey, "")
 }
 
-func seedServers(fallbackURL string) []BuddyServer {
+func seedServers(fallbackURL string, localBaseURL string) []BuddyServer {
 	baseURL, err := normalizedBaseURL(fallbackURL)
 	if err != nil {
+		return nil
+	}
+	if baseURL == strings.TrimRight(localBaseURL, "/") {
 		return nil
 	}
 	return []BuddyServer{{
@@ -94,6 +150,44 @@ func seedServers(fallbackURL string) []BuddyServer {
 		Name:    normalizedServerName("", baseURL),
 		BaseURL: baseURL,
 	}}
+}
+
+func dedupeServers(servers []BuddyServer) []BuddyServer {
+	out := make([]BuddyServer, 0, len(servers))
+	seen := make(map[string]int, len(servers))
+	for _, server := range servers {
+		if server.IsLocal() {
+			continue
+		}
+		baseURL, err := normalizedBaseURL(server.BaseURL)
+		if err != nil {
+			continue
+		}
+		item := BuddyServer{
+			ID:      firstNonEmptyText(strings.TrimSpace(server.ID), newServerID()),
+			Name:    normalizedServerName(server.Name, baseURL),
+			BaseURL: baseURL,
+		}
+		if index, ok := seen[item.BaseURL]; ok {
+			out[index] = item
+			continue
+		}
+		seen[item.BaseURL] = len(out)
+		out = append(out, item)
+	}
+	return out
+}
+
+func remoteServerConfigs(servers []BuddyServer) []config.RemoteServerConfig {
+	out := make([]config.RemoteServerConfig, 0, len(servers))
+	for _, server := range dedupeServers(servers) {
+		out = append(out, config.RemoteServerConfig{
+			ID:      server.ID,
+			Name:    server.Name,
+			BaseURL: server.BaseURL,
+		})
+	}
+	return out
 }
 
 func normalizedBaseURL(value string) (string, error) {

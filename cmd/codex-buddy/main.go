@@ -23,6 +23,8 @@ func main() {
 		os.Exit(runStatus(os.Args[2:]))
 	case "uconsole":
 		os.Exit(runUConsole(os.Args[2:]))
+	case "cli":
+		os.Exit(runCLI(os.Args[2:]))
 	case "print-config":
 		os.Exit(runPrintConfig(os.Args[2:]))
 	case "print-hooks":
@@ -55,6 +57,7 @@ func usage(w io.Writer) {
 	_, _ = fmt.Fprintln(w, "  codex-buddy setup [--config path] [--host 0.0.0.0] [--port 8787] [--skip-systemd]")
 	_, _ = fmt.Fprintln(w, "  codex-buddy status [--config path] [--json]")
 	_, _ = fmt.Fprintln(w, "  codex-buddy uconsole [--config path] [--server-url url] [--no-led]")
+	_, _ = fmt.Fprintln(w, "  codex-buddy cli [--config path] [--server-url url]")
 	_, _ = fmt.Fprintln(w, "  codex-buddy print-config [--config path]")
 	_, _ = fmt.Fprintln(w, "  codex-buddy print-hooks")
 	_, _ = fmt.Fprintln(w, "  codex-buddy print-service")

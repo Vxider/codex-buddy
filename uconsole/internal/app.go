@@ -5,11 +5,13 @@ package uconsole
 import (
 	"context"
 	"fmt"
+	"hash/fnv"
 	stdhtml "html"
 	"image/color"
 	"log"
 	"math/rand"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -26,21 +28,26 @@ import (
 	"fyne.io/fyne/v2/widget"
 	xhtml "golang.org/x/net/html"
 
+	"github.com/vxider/codex-buddy/engine"
 	"github.com/vxider/codex-buddy/internal/config"
 	"github.com/vxider/codex-buddy/internal/model"
 	"github.com/vxider/codex-buddy/uconsole/internal/light"
 )
 
 type App struct {
-	cfg         config.UConsoleConfig
-	logger      *log.Logger
-	fyneApp     fyne.App
-	window      fyne.Window
-	lightRunner *light.Runner
+	cfg          config.UConsoleConfig
+	rootCfg      config.Config
+	configPath   string
+	logger       *log.Logger
+	fyneApp      fyne.App
+	window       fyne.Window
+	lightRunner  *light.Runner
+	localRuntime *engine.Runtime
+	localServer  *engine.EmbeddedServer
 
 	stateMu                  sync.RWMutex
 	servers                  []BuddyServer
-	clients                  map[string]*Client
+	clients                  map[string]statusClient
 	serverSnapshots          map[string]serverSnapshot
 	lastStatus               StatusResponse
 	lastNotifs               []NotificationResponse
@@ -77,6 +84,7 @@ type App struct {
 	themeButton           *widget.Button
 	refreshButton         *widget.Button
 	settingsButton        *widget.Button
+	serverButton          *widget.Button
 	refreshActivity       *widget.Activity
 	rootScroll            *container.Scroll
 	settingsSummary       *widget.Label
@@ -210,7 +218,6 @@ var openShortcutPool = []fyne.KeyName{
 	fyne.KeyP,
 	fyne.KeyQ,
 	fyne.KeyU,
-	fyne.KeyV,
 	fyne.KeyW,
 	fyne.KeyY,
 	fyne.KeyZ,
@@ -1066,16 +1073,22 @@ func (r *splitBadgeButtonRenderer) BackgroundColor() color.Color {
 	return color.Transparent
 }
 
-func Run(ctx context.Context, cfg config.UConsoleConfig, logger *log.Logger) error {
+func Run(ctx context.Context, rootCfg config.Config, configPath string, logger *log.Logger) error {
+	cfg := rootCfg.UConsole
 	if cfg.PollFallbackMS <= 0 || cfg.PollFallbackMS > 5000 {
 		cfg.PollFallbackMS = 5000
 	}
 	cfg.Window.Fullscreen = false
 
+	childCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
 	gui := &App{
+		rootCfg:               rootCfg,
+		configPath:            configPath,
 		cfg:                   cfg,
 		logger:                logger,
-		clients:               make(map[string]*Client),
+		clients:               make(map[string]statusClient),
 		serverSnapshots:       make(map[string]serverSnapshot),
 		openShortcutBySession: make(map[string]fyne.KeyName),
 		openSessionByShortcut: make(map[fyne.KeyName]string),
@@ -1085,10 +1098,25 @@ func Run(ctx context.Context, cfg config.UConsoleConfig, logger *log.Logger) err
 		statusLine:            "Connecting to codex-buddy",
 		darkMode:              true,
 	}
+	gui.localRuntime = engine.NewRuntime(rootCfg, logger)
+	gui.localRuntime.Start(childCtx)
+	gui.localServer = engine.NewEmbeddedServer(gui.localRuntime, rootCfg, logger)
 
 	gui.fyneApp = app.NewWithID("github.com.vxider.codex-buddy.uconsole")
 	gui.applyTheme()
-	gui.replaceServers(loadServers(gui.fyneApp.Preferences(), cfg.ServerURL), false)
+	configuredServers := configuredServersFromConfig(rootCfg, gui.fyneApp.Preferences())
+	gui.replaceServers(configuredServers, false)
+	if len(rootCfg.RemoteServers) == 0 && len(configuredServers) > 0 {
+		_ = gui.saveConfig(func(target *config.Config) {
+			target.RemoteServers = remoteServerConfigs(configuredServers)
+		})
+	}
+	persistLegacyServersClear(gui.fyneApp.Preferences())
+	if rootCfg.LocalServer.Enabled {
+		if err := gui.localServer.Start(childCtx, rootCfg); err != nil {
+			gui.statusLine = "Local server failed: " + briefError(err.Error(), 80)
+		}
+	}
 
 	gui.window = gui.fyneApp.NewWindow("codex-buddy uConsole")
 	gui.window.SetMaster()
@@ -1101,9 +1129,6 @@ func Run(ctx context.Context, cfg config.UConsoleConfig, logger *log.Logger) err
 			gui.render()
 		}
 	})
-
-	childCtx, cancel := context.WithCancel(ctx)
-	defer cancel()
 
 	gui.window.SetCloseIntercept(func() {
 		cancel()
@@ -1157,6 +1182,8 @@ func (a *App) buildUI() fyne.CanvasObject {
 
 	a.settingsButton = widget.NewButtonWithIcon("Settings (S)", theme.SettingsIcon(), a.showSettingsDialog)
 	a.settingsButton.Importance = widget.MediumImportance
+	a.serverButton = widget.NewButtonWithIcon("Server (V)", theme.MediaRecordIcon(), a.toggleLocalServer)
+	a.serverButton.Importance = widget.MediumImportance
 	a.themeButton = widget.NewButtonWithIcon("Light (T)", theme.ColorPaletteIcon(), a.toggleTheme)
 	a.themeButton.Importance = widget.MediumImportance
 	a.refreshButton = widget.NewButtonWithIcon("Refresh (R)", theme.ViewRefreshIcon(), func() { go a.runManualRefresh() })
@@ -1189,6 +1216,7 @@ func (a *App) buildUI() fyne.CanvasObject {
 		a.updatedLabel,
 		a.refreshActivity,
 		helpHint,
+		a.serverButton,
 		a.settingsButton,
 		a.themeButton,
 		a.refreshButton,
@@ -1280,6 +1308,8 @@ func (a *App) installKeyHandlers() {
 			a.showSettingsDialog()
 		case fyne.KeyT:
 			a.toggleTheme()
+		case fyne.KeyV:
+			a.toggleLocalServer()
 		}
 	})
 	a.window.Canvas().SetOnTypedRune(func(r rune) {
@@ -1511,6 +1541,7 @@ func (a *App) startSessionContinuePending(sessionKey string) bool {
 		return false
 	}
 	a.openActionPending[sessionKey] = true
+	fyne.Do(a.render)
 	return true
 }
 
@@ -1571,12 +1602,12 @@ func (a *App) refreshNow(ctx context.Context, force bool) error {
 	return err
 }
 
-func (a *App) serverTargets() ([]BuddyServer, map[string]*Client, map[string]serverSnapshot) {
+func (a *App) serverTargets() ([]BuddyServer, map[string]statusClient, map[string]serverSnapshot) {
 	a.stateMu.RLock()
 	defer a.stateMu.RUnlock()
 
 	servers := append([]BuddyServer(nil), a.servers...)
-	clients := make(map[string]*Client, len(a.clients))
+	clients := make(map[string]statusClient, len(a.clients))
 	for id, client := range a.clients {
 		clients[id] = client
 	}
@@ -1587,7 +1618,7 @@ func (a *App) serverTargets() ([]BuddyServer, map[string]*Client, map[string]ser
 	return servers, clients, snapshots
 }
 
-func (a *App) loadAllServers(ctx context.Context, servers []BuddyServer, clients map[string]*Client, previous map[string]serverSnapshot, force bool) []serverSnapshot {
+func (a *App) loadAllServers(ctx context.Context, servers []BuddyServer, clients map[string]statusClient, previous map[string]serverSnapshot, force bool) []serverSnapshot {
 	if len(servers) == 0 {
 		return nil
 	}
@@ -1601,7 +1632,7 @@ func (a *App) loadAllServers(ctx context.Context, servers []BuddyServer, clients
 		client := clients[server.ID]
 		prev := previous[server.ID]
 		wg.Add(1)
-		go func(server BuddyServer, client *Client, prev serverSnapshot) {
+		go func(server BuddyServer, client statusClient, prev serverSnapshot) {
 			defer wg.Done()
 			snapshot := serverSnapshot{
 				Server:       server,
@@ -1886,6 +1917,7 @@ func (a *App) render() {
 	a.stateMu.RLock()
 	status := a.lastStatus
 	servers := append([]BuddyServer(nil), a.servers...)
+	pendingSessions := clonePendingMap(a.openActionPending)
 	tsState := a.tailscaleState
 	exitNodeMenuOpen := a.exitNodeMenuOpen
 	tailscaleBusy := a.tailscaleBusy
@@ -1921,7 +1953,7 @@ func (a *App) render() {
 		border.StrokeColor = cardBorder(darkMode, false)
 		border.Refresh()
 	}
-	openSessions, otherSessions := splitSessionsByOpenState(status.Sessions)
+	openSessions, otherSessions := splitSessionsByOpenState(status.Sessions, pendingSessions)
 	if a.openSessionCardBorder != nil {
 		a.openSessionCardBorder.StrokeColor = cardBorder(darkMode, len(openSessions) > 0)
 		a.openSessionCardBorder.Refresh()
@@ -1932,6 +1964,7 @@ func (a *App) render() {
 	}
 
 	a.themeButton.SetText(themeToggleLabel(darkMode))
+	a.syncServerButton()
 	if status.ServerTime.IsZero() {
 		a.updatedLabel.SetText("Updated -")
 	} else {
@@ -2066,16 +2099,17 @@ func (a *App) executeSessionContinue(session SessionResponse) {
 	if !a.startSessionContinuePending(sessionKey) {
 		return
 	}
-	defer a.finishSessionContinuePending(sessionKey)
 
 	client := a.clientForServer(session.ServerID)
 	if client == nil {
+		a.finishSessionContinuePending(sessionKey)
 		a.setStatusLine("Selected server is unavailable")
 		return
 	}
 
 	a.setStatusLine("Approving " + sessionListTitle(session) + "...")
 	if err := client.ContinueSession(context.Background(), session); err != nil {
+		a.finishSessionContinuePending(sessionKey)
 		a.setStatusLine(err.Error())
 		return
 	}
@@ -2099,7 +2133,7 @@ func (a *App) ackNotification(item NotificationResponse) {
 	_ = a.refreshNow(context.Background(), true)
 }
 
-func (a *App) clientForServer(serverID string) *Client {
+func (a *App) clientForServer(serverID string) statusClient {
 	a.stateMu.RLock()
 	defer a.stateMu.RUnlock()
 	return a.clients[serverID]
@@ -2260,7 +2294,7 @@ func (a *App) showSettingsDialog() {
 	a.settingsSummary.Wrapping = fyne.TextWrapWord
 	a.settingsList = container.NewVBox()
 
-	addButton := widget.NewButtonWithIcon("Add Server (N)", theme.ContentAddIcon(), func() {
+	addButton := widget.NewButtonWithIcon("Add Remote Server (N)", theme.ContentAddIcon(), func() {
 		a.showServerEditor(nil)
 	})
 	addButton.Importance = widget.HighImportance
@@ -2338,11 +2372,7 @@ func (a *App) refreshSettingsDialogContent() {
 		if a.settingsSummary == nil || a.settingsList == nil {
 			return
 		}
-		if len(servers) == 0 {
-			a.settingsSummary.SetText("No servers configured. Add at least one Codex Buddy server URL.")
-		} else {
-			a.settingsSummary.SetText(fmt.Sprintf("%d server%s configured. Main view aggregates status and sessions across all of them.", len(servers), pluralSuffix(len(servers))))
-		}
+		a.settingsSummary.SetText(a.settingsSummaryText())
 		a.settingsList.Objects = settingsServerRows(a, snapshots, darkMode, selectedID)
 		a.settingsList.Refresh()
 		if dialogRef != nil {
@@ -2356,6 +2386,178 @@ func pluralSuffix(count int) string {
 		return ""
 	}
 	return "s"
+}
+
+func (a *App) settingsSummaryText() string {
+	a.stateMu.RLock()
+	defer a.stateMu.RUnlock()
+
+	remoteCount := 0
+	for _, server := range a.servers {
+		if !server.IsLocal() {
+			remoteCount++
+		}
+	}
+
+	serverState := "off"
+	if a.localServer != nil && a.localServer.Running() {
+		serverState = "on (" + a.localServer.Address() + ")"
+	}
+
+	switch remoteCount {
+	case 0:
+		return "Local runtime is always available. Remote servers: 0. Local HTTP server is " + serverState + "."
+	default:
+		return fmt.Sprintf("Local runtime is always available. %d remote server%s configured. Local HTTP server is %s.", remoteCount, pluralSuffix(remoteCount), serverState)
+	}
+}
+
+func (a *App) saveConfig(update func(*config.Config)) error {
+	a.stateMu.RLock()
+	cfgCopy := a.rootCfg
+	path := a.configPath
+	a.stateMu.RUnlock()
+
+	update(&cfgCopy)
+	if err := config.Save(path, cfgCopy); err != nil {
+		return err
+	}
+
+	a.stateMu.Lock()
+	a.rootCfg = cfgCopy
+	a.cfg = cfgCopy.UConsole
+	a.stateMu.Unlock()
+	return nil
+}
+
+func (a *App) syncServerButton() {
+	if a.serverButton == nil {
+		return
+	}
+	running := a.localServer != nil && a.localServer.Running()
+	a.serverButton.SetText("Server (V)")
+	if running {
+		a.serverButton.Importance = widget.HighImportance
+	} else {
+		a.serverButton.Importance = widget.MediumImportance
+	}
+	a.serverButton.Refresh()
+}
+
+func (a *App) toggleLocalServer() {
+	a.stateMu.RLock()
+	cfgCopy := a.rootCfg
+	a.stateMu.RUnlock()
+
+	var err error
+	if a.localServer != nil && a.localServer.Running() {
+		err = a.localServer.Stop(context.Background())
+		cfgCopy.LocalServer.Enabled = false
+	} else {
+		err = a.localServer.Start(context.Background(), cfgCopy)
+		cfgCopy.LocalServer.Enabled = true
+	}
+	if err != nil {
+		a.setStatusLine("Local server toggle failed: " + briefError(err.Error(), 80))
+		fyne.Do(func() { a.syncServerButton() })
+		return
+	}
+
+	if saveErr := a.saveConfig(func(target *config.Config) {
+		target.LocalServer.Enabled = cfgCopy.LocalServer.Enabled
+		target.Listen = cfgCopy.Listen
+		target.RemoteServers = cfgCopy.RemoteServers
+	}); saveErr != nil {
+		a.setStatusLine("Save config failed: " + briefError(saveErr.Error(), 80))
+	}
+
+	a.setStatusLine(localServerStatusLine(a.localServer != nil && a.localServer.Running(), a.localServer.Address()))
+	fyne.Do(func() {
+		a.syncServerButton()
+		a.refreshSettingsDialogContent()
+	})
+}
+
+func localServerStatusLine(running bool, addr string) string {
+	if running {
+		return "Local server listening on " + addr
+	}
+	return "Local server stopped"
+}
+
+func (a *App) showLocalServerEditor() {
+	a.stateMu.RLock()
+	current := a.rootCfg
+	a.stateMu.RUnlock()
+
+	hostEntry := widget.NewEntry()
+	hostEntry.SetText(current.Listen.Host)
+	portEntry := widget.NewEntry()
+	portEntry.SetText(strconv.Itoa(current.Listen.Port))
+	enabledCheck := widget.NewCheck("Start local HTTP server automatically", nil)
+	enabledCheck.SetChecked(current.LocalServer.Enabled)
+
+	items := []*widget.FormItem{
+		widget.NewFormItem("Host", hostEntry),
+		widget.NewFormItem("Port", portEntry),
+		widget.NewFormItem("", enabledCheck),
+	}
+
+	formDialog := dialog.NewForm("Local Server", "Save (Enter)", "Cancel (Esc)", items, func(ok bool) {
+		if !ok {
+			return
+		}
+		port, err := strconv.Atoi(strings.TrimSpace(portEntry.Text))
+		if err != nil || port <= 0 || port > 65535 {
+			dialog.ShowError(fmt.Errorf("enter a valid port"), a.window)
+			return
+		}
+		nextCfg := current
+		nextCfg.Listen.Host = strings.TrimSpace(hostEntry.Text)
+		nextCfg.Listen.Port = port
+		nextCfg.LocalServer.Enabled = enabledCheck.Checked
+		nextCfg.RemoteServers = remoteServerConfigs(dedupeServers(a.servers))
+
+		wasRunning := a.localServer != nil && a.localServer.Running()
+		if wasRunning {
+			if err := a.localServer.Stop(context.Background()); err != nil {
+				dialog.ShowError(err, a.window)
+				return
+			}
+		}
+		if nextCfg.LocalServer.Enabled {
+			if err := a.localServer.Start(context.Background(), nextCfg); err != nil {
+				dialog.ShowError(err, a.window)
+				_ = a.localServer.Start(context.Background(), current)
+				return
+			}
+		}
+
+		if err := a.saveConfig(func(target *config.Config) {
+			*target = nextCfg
+		}); err != nil {
+			dialog.ShowError(err, a.window)
+			return
+		}
+
+		a.setStatusLine(localServerStatusLine(a.localServer != nil && a.localServer.Running(), a.localServer.Address()))
+		fyne.Do(func() {
+			a.syncServerButton()
+			a.refreshSettingsDialogContent()
+		})
+	}, a.window)
+	formDialog.Resize(fyne.NewSize(760, 320))
+	formDialog.SetOnClosed(func() {
+		a.stateMu.Lock()
+		if a.settingsEditor == formDialog {
+			a.settingsEditor = nil
+		}
+		a.stateMu.Unlock()
+	})
+	a.stateMu.Lock()
+	a.settingsEditor = formDialog
+	a.stateMu.Unlock()
+	formDialog.Show()
 }
 
 func (a *App) showServerEditor(editing *BuddyServer) {
@@ -2378,7 +2580,7 @@ func (a *App) showServerEditor(editing *BuddyServer) {
 		widget.NewFormItem("Server URL", urlEntry),
 	}
 
-	title := "Add Server"
+	title := "Add Remote Server"
 	if editing != nil {
 		title = "Edit Server"
 	}
@@ -2425,7 +2627,13 @@ func (a *App) upsertServer(server BuddyServer) error {
 	server.Name = normalizedServerName(server.Name, baseURL)
 
 	a.stateMu.RLock()
-	servers := append([]BuddyServer(nil), a.servers...)
+	servers := make([]BuddyServer, 0, len(a.servers))
+	for _, item := range a.servers {
+		if item.IsLocal() {
+			continue
+		}
+		servers = append(servers, item)
+	}
 	a.stateMu.RUnlock()
 
 	replaced := false
@@ -2446,7 +2654,13 @@ func (a *App) upsertServer(server BuddyServer) error {
 
 func (a *App) deleteServer(server BuddyServer) {
 	a.stateMu.RLock()
-	servers := append([]BuddyServer(nil), a.servers...)
+	servers := make([]BuddyServer, 0, len(a.servers))
+	for _, item := range a.servers {
+		if item.IsLocal() {
+			continue
+		}
+		servers = append(servers, item)
+	}
 	a.stateMu.RUnlock()
 
 	filtered := make([]BuddyServer, 0, len(servers))
@@ -2460,18 +2674,27 @@ func (a *App) deleteServer(server BuddyServer) {
 }
 
 func (a *App) replaceServers(servers []BuddyServer, persist bool) {
-	servers = sanitizeServers(servers)
+	configuredServers := dedupeServers(servers)
+	effectiveServers := append([]BuddyServer{localServer()}, configuredServers...)
 
 	a.stateMu.Lock()
 	oldClients := a.clients
 	oldSnapshots := a.serverSnapshots
 
-	clients := make(map[string]*Client, len(servers))
-	snapshots := make(map[string]serverSnapshot, len(servers))
-	for _, server := range servers {
+	clients := make(map[string]statusClient, len(effectiveServers))
+	snapshots := make(map[string]serverSnapshot, len(effectiveServers))
+	for _, server := range effectiveServers {
 		client, ok := oldClients[server.ID]
-		if !ok || client == nil || client.baseURL != server.BaseURL {
-			client = NewClient(server.BaseURL, time.Duration(a.cfg.HTTPTimeoutMS)*time.Millisecond, a.logger)
+		switch {
+		case server.IsLocal():
+			if _, ok := client.(*LocalClient); !ok || client == nil {
+				client = NewLocalClient(a.rootCfg, a.localRuntime)
+			}
+		default:
+			typed, ok := client.(*Client)
+			if !ok || typed == nil || typed.baseURL != server.BaseURL {
+				client = NewClient(server.BaseURL, time.Duration(a.cfg.HTTPTimeoutMS)*time.Millisecond, a.logger)
+			}
 		}
 		clients[server.ID] = client
 
@@ -2487,34 +2710,38 @@ func (a *App) replaceServers(servers []BuddyServer, persist bool) {
 		snapshots[server.ID] = snapshot
 	}
 
-	a.servers = append([]BuddyServer(nil), servers...)
+	a.servers = append([]BuddyServer(nil), effectiveServers...)
 	a.clients = clients
 	a.serverSnapshots = snapshots
-	if len(servers) == 0 {
+	if len(effectiveServers) == 0 {
 		a.selectedSettingsServerID = ""
 	} else {
 		selectedFound := false
-		for _, server := range servers {
+		for _, server := range effectiveServers {
 			if server.ID == a.selectedSettingsServerID {
 				selectedFound = true
 				break
 			}
 		}
 		if !selectedFound {
-			a.selectedSettingsServerID = servers[0].ID
+			a.selectedSettingsServerID = effectiveServers[0].ID
 		}
 	}
 
-	orderedSnapshots := make([]serverSnapshot, 0, len(servers))
-	for _, server := range servers {
+	orderedSnapshots := make([]serverSnapshot, 0, len(effectiveServers))
+	for _, server := range effectiveServers {
 		orderedSnapshots = append(orderedSnapshots, snapshots[server.ID])
 	}
 	a.lastStatus, a.lastNotifs, a.connected, a.lastError = aggregateSnapshots(orderedSnapshots)
 	a.syncOpenSessionShortcutsLocked(a.lastStatus.Sessions)
 	a.stateMu.Unlock()
 
-	if persist && a.fyneApp != nil {
-		saveServers(a.fyneApp.Preferences(), servers)
+	if persist {
+		if err := a.saveConfig(func(target *config.Config) {
+			target.RemoteServers = remoteServerConfigs(configuredServers)
+		}); err != nil {
+			a.setStatusLine("Save config failed: " + briefError(err.Error(), 80))
+		}
 	}
 
 	fyne.Do(func() {
@@ -2536,6 +2763,9 @@ func (a *App) syncOpenSessionShortcutsLocked(sessions []SessionResponse) {
 		}
 		sessionKey := sessionActionKey(session)
 		activeSessions[sessionKey] = true
+		if a.openActionPending[sessionKey] {
+			continue
+		}
 		if key, ok := a.openShortcutBySession[sessionKey]; ok && key != "" && !usedKeys[key] {
 			nextBySession[sessionKey] = key
 			usedKeys[key] = true
@@ -2548,6 +2778,9 @@ func (a *App) syncOpenSessionShortcutsLocked(sessions []SessionResponse) {
 			continue
 		}
 		sessionKey := sessionActionKey(session)
+		if a.openActionPending[sessionKey] {
+			continue
+		}
 		if _, ok := nextBySession[sessionKey]; ok {
 			continue
 		}
@@ -2745,20 +2978,23 @@ func serverListObjects(snapshots []serverSnapshot, darkMode bool) []fyne.CanvasO
 
 func serverStripObjects(snapshots []serverSnapshot, darkMode bool) []fyne.CanvasObject {
 	if len(snapshots) == 0 {
-		return []fyne.CanvasObject{serverStatusChip("No servers", false, darkMode)}
+		return []fyne.CanvasObject{serverStatusChip("No servers", "", false, darkMode)}
 	}
 
 	objects := make([]fyne.CanvasObject, 0, len(snapshots))
 	for _, snapshot := range snapshots {
-		objects = append(objects, serverStatusChip(snapshot.Server.DisplayName(), snapshot.Connected, darkMode))
+		objects = append(objects, serverStatusChip(snapshot.Server.DisplayName(), snapshot.Server.ID, snapshot.Connected, darkMode))
 	}
 	return objects
 }
 
-func splitSessionsByOpenState(sessions []SessionResponse) ([]SessionResponse, []SessionResponse) {
+func splitSessionsByOpenState(sessions []SessionResponse, hidden map[string]bool) ([]SessionResponse, []SessionResponse) {
 	openSessions := make([]SessionResponse, 0, len(sessions))
 	otherSessions := make([]SessionResponse, 0, len(sessions))
 	for _, session := range sessions {
+		if hidden[sessionActionKey(session)] {
+			continue
+		}
 		if isOpenSession(session) {
 			openSessions = append(openSessions, session)
 			continue
@@ -2808,7 +3044,7 @@ func openSessionRow(session SessionResponse, darkMode bool, state sessionListSta
 	title.Truncation = fyne.TextTruncateEllipsis
 
 	badges := container.NewHBox(
-		sourceBadge(session.ServerName, darkMode),
+		sourceBadge(session.ServerName, session.ServerID, darkMode),
 		openShortcutBadge(shortcutKey, isHolding, isPending),
 	)
 
@@ -2908,27 +3144,48 @@ func settingsServerRows(app *App, snapshots []serverSnapshot, darkMode bool, sel
 		server := snapshot.Server
 		selected := server.ID == selectedID
 
-		editButton := widget.NewButtonWithIcon("Edit (E)", theme.DocumentCreateIcon(), func() {
-			app.selectSettingsServer(server.ID)
-			serverCopy := server
-			app.showServerEditor(&serverCopy)
-		})
-		deleteButton := widget.NewButtonWithIcon("Delete (X)", theme.DeleteIcon(), func() {
-			app.selectSettingsServer(server.ID)
-			app.showDeleteServerConfirm(server)
-		})
+		var rowBody fyne.CanvasObject
+		if server.IsLocal() {
+			editButton := widget.NewButtonWithIcon("Configure (E)", theme.SettingsIcon(), func() {
+				app.selectSettingsServer(server.ID)
+				app.showLocalServerEditor()
+			})
+			toggleLabel := "Start Server (V)"
+			if app.localServer != nil && app.localServer.Running() {
+				toggleLabel = "Stop Server (V)"
+			}
+			toggleButton := widget.NewButtonWithIcon(toggleLabel, theme.MediaRecordIcon(), func() {
+				app.selectSettingsServer(server.ID)
+				app.toggleLocalServer()
+			})
+			rowBody = container.NewVBox(
+				serverRow(snapshot, darkMode),
+				metaText("Built-in local runtime; no webserver required for local state.", darkMode),
+				container.NewHBox(editButton, toggleButton),
+			)
+		} else {
+			editButton := widget.NewButtonWithIcon("Edit (E)", theme.DocumentCreateIcon(), func() {
+				app.selectSettingsServer(server.ID)
+				serverCopy := server
+				app.showServerEditor(&serverCopy)
+			})
+			deleteButton := widget.NewButtonWithIcon("Delete (X)", theme.DeleteIcon(), func() {
+				app.selectSettingsServer(server.ID)
+				app.showDeleteServerConfirm(server)
+			})
 
-		rowBody := container.NewVBox(
-			serverRow(snapshot, darkMode),
-			container.NewHBox(editButton, deleteButton),
-		)
+			rowBody = container.NewVBox(
+				serverRow(snapshot, darkMode),
+				container.NewHBox(editButton, deleteButton),
+			)
+		}
 
 		border := canvas.NewRectangle(color.Transparent)
 		border.CornerRadius = 14
 		border.StrokeWidth = 1.5
 		border.StrokeColor = cardBorder(darkMode, false)
 		if selected {
-			border.StrokeColor = sourceBadgeFill(darkMode)
+			border.StrokeColor = sourceBadgeFill(server.ID, darkMode)
 		}
 
 		objects = append(objects, container.NewStack(
@@ -2968,6 +3225,10 @@ func (a *App) editSelectedSettingsServer() {
 	if !ok {
 		return
 	}
+	if server.IsLocal() {
+		a.showLocalServerEditor()
+		return
+	}
 	serverCopy := server
 	a.showServerEditor(&serverCopy)
 }
@@ -2975,6 +3236,10 @@ func (a *App) editSelectedSettingsServer() {
 func (a *App) confirmDeleteSelectedSettingsServer() {
 	server, ok := a.selectedSettingsServer()
 	if !ok {
+		return
+	}
+	if server.IsLocal() {
+		a.setStatusLine("Local runtime cannot be deleted")
 		return
 	}
 	a.showDeleteServerConfirm(server)
@@ -3209,7 +3474,7 @@ func sessionRow(session SessionResponse, darkMode bool) fyne.CanvasObject {
 	title.Truncation = fyne.TextTruncateEllipsis
 
 	badges := container.NewHBox(
-		sourceBadge(session.ServerName, darkMode),
+		sourceBadge(session.ServerName, session.ServerID, darkMode),
 		stateBadge(session.State),
 	)
 
@@ -3285,7 +3550,7 @@ func connectivityBadge(connected bool) fyne.CanvasObject {
 	return container.NewStack(bg, container.NewCenter(text))
 }
 
-func serverStatusChip(name string, connected bool, darkMode bool) fyne.CanvasObject {
+func serverStatusChip(name string, serverID string, connected bool, darkMode bool) fyne.CanvasObject {
 	label := valueOrDash(name)
 	textColor := color.Color(color.White)
 	if !connected {
@@ -3304,14 +3569,18 @@ func serverStatusChip(name string, connected bool, darkMode bool) fyne.CanvasObj
 		width = minWidth
 	}
 
-	bg := canvas.NewRectangle(serverStatusFill(connected))
+	fill := serverStatusFill(connected)
+	if connected {
+		fill = sourceBadgeFill(serverID, darkMode)
+	}
+	bg := canvas.NewRectangle(fill)
 	bg.SetMinSize(fyne.NewSize(width, headerControlHeight))
 	bg.CornerRadius = 10
 
 	return container.NewStack(bg, container.NewCenter(text))
 }
 
-func sourceBadge(name string, darkMode bool) fyne.CanvasObject {
+func sourceBadge(name string, serverID string, darkMode bool) fyne.CanvasObject {
 	label := valueOrDash(name)
 
 	text := canvas.NewText(label, color.White)
@@ -3326,7 +3595,7 @@ func sourceBadge(name string, darkMode bool) fyne.CanvasObject {
 		width = minWidth
 	}
 
-	bg := canvas.NewRectangle(sourceBadgeFill(darkMode))
+	bg := canvas.NewRectangle(sourceBadgeFill(serverID, darkMode))
 	bg.SetMinSize(fyne.NewSize(width, 32))
 	bg.CornerRadius = 10
 
@@ -3350,6 +3619,17 @@ func markdownText(value string, darkMode bool) fyne.CanvasObject {
 		return objects[0]
 	}
 	return container.NewVBox(objects...)
+}
+
+func compactMarkdownBlock(objects []fyne.CanvasObject, gap float32) fyne.CanvasObject {
+	visible := visibleObjects(objects)
+	if len(visible) == 0 {
+		return layout.NewSpacer()
+	}
+	if len(visible) == 1 {
+		return visible[0]
+	}
+	return container.New(layout.NewCustomPaddedVBoxLayout(gap), visible...)
 }
 
 func sessionSummaryObject(session SessionResponse, darkMode bool, fallback string) fyne.CanvasObject {
@@ -3478,7 +3758,10 @@ func htmlListObjects(node *xhtml.Node, ordered bool, darkMode bool) []fyne.Canva
 		objects = append(objects, htmlParagraphObjects(child, darkMode, prefix)...)
 		index++
 	}
-	return objects
+	if len(objects) == 0 {
+		return nil
+	}
+	return []fyne.CanvasObject{compactMarkdownBlock(objects, 0)}
 }
 
 func htmlParagraphObjects(node *xhtml.Node, darkMode bool, prefix string) []fyne.CanvasObject {
@@ -3824,7 +4107,9 @@ func markdownObjects(segments []widget.RichTextSegment, darkMode bool) []fyne.Ca
 				objects = append(objects, newMarkdownParagraph(spans))
 			}
 		case *widget.ListSegment:
-			objects = append(objects, markdownObjects(item.Segments(), darkMode)...)
+			if listObjects := markdownObjects(item.Segments(), darkMode); len(listObjects) > 0 {
+				objects = append(objects, compactMarkdownBlock(listObjects, 0))
+			}
 		case *widget.HyperlinkSegment:
 			objects = append(objects, newMarkdownParagraph([]markdownSpan{{
 				Text:  item.Text,
@@ -3987,11 +4272,47 @@ func metaForeground(darkMode bool) color.Color {
 	return color.NRGBA{R: 0x71, G: 0x67, B: 0x5A, A: 0xFF}
 }
 
-func sourceBadgeFill(darkMode bool) color.NRGBA {
-	if darkMode {
-		return color.NRGBA{R: 0x5A, G: 0x45, B: 0x2A, A: 0xFF}
+func sourceBadgeFill(serverID string, darkMode bool) color.NRGBA {
+	key := strings.TrimSpace(strings.ToLower(serverID))
+	if key == localServerID {
+		if darkMode {
+			return color.NRGBA{R: 0x1E, G: 0x5A, B: 0x65, A: 0xFF}
+		}
+		return color.NRGBA{R: 0x2C, G: 0x94, B: 0xA3, A: 0xFF}
 	}
-	return color.NRGBA{R: 0xA3, G: 0x73, B: 0x2D, A: 0xFF}
+
+	palette := []color.NRGBA{
+		{R: 0x8A, G: 0x61, B: 0x18, A: 0xFF},
+		{R: 0x7A, G: 0x3E, B: 0x46, A: 0xFF},
+		{R: 0x4E, G: 0x5F, B: 0x9D, A: 0xFF},
+		{R: 0x4C, G: 0x6B, B: 0x39, A: 0xFF},
+		{R: 0x7A, G: 0x4F, B: 0x92, A: 0xFF},
+		{R: 0xA3, G: 0x4F, B: 0x2D, A: 0xFF},
+	}
+	if darkMode {
+		palette = []color.NRGBA{
+			{R: 0x5A, G: 0x45, B: 0x2A, A: 0xFF},
+			{R: 0x5D, G: 0x34, B: 0x3B, A: 0xFF},
+			{R: 0x3E, G: 0x4C, B: 0x7A, A: 0xFF},
+			{R: 0x3F, G: 0x57, B: 0x31, A: 0xFF},
+			{R: 0x5B, G: 0x3D, B: 0x70, A: 0xFF},
+			{R: 0x7A, G: 0x45, B: 0x2D, A: 0xFF},
+		}
+	}
+
+	if key == "" {
+		key = "server"
+	}
+	hasher := fnv.New32a()
+	_, _ = hasher.Write([]byte(key))
+	return palette[int(hasher.Sum32())%len(palette)]
+}
+
+func serverToggleFill(running bool) color.NRGBA {
+	if running {
+		return color.NRGBA{R: 0x2D, G: 0x7A, B: 0x52, A: 0xFF}
+	}
+	return color.NRGBA{R: 0x4A, G: 0x4B, B: 0x50, A: 0xFF}
 }
 
 func serverStatusFill(connected bool) color.NRGBA {
@@ -4212,6 +4533,7 @@ func (a *App) showHelpDialog() {
 		"R  Refresh all servers",
 		"S  Server settings",
 		"T  Toggle theme",
+		"V  Toggle local server",
 		"J/K  Scroll",
 		"A  Acknowledge notification",
 		"C  Continue current session",
