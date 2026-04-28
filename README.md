@@ -2,6 +2,16 @@
 
 `codex-buddy` is a passive companion for Codex CLI. The server runs on the same machine as `codex`, aggregates session state from hooks and transcript watchers, and exposes that state over local-network HTTP/SSE without taking over your main terminal or tmux workflow.
 
+## Design philosophy
+
+`codex-buddy` follows the same practical philosophy that makes `tmux` useful:
+
+- keep the primary Codex session in its normal SSH/terminal/tmux environment
+- add visibility and lightweight sidecar controls without replacing the main UI
+- let clients attach, observe, disconnect, and reconnect without disturbing the running session
+- prefer passive state bridging over deep orchestration or hidden automation
+- keep full debugging and detailed interaction in the main terminal, not in the companion surface
+
 The repository currently contains three tracks:
 
 - Server: passively monitors locally running Codex CLI sessions without creating threads or sending turns
