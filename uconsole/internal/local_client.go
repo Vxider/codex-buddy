@@ -25,6 +25,7 @@ type statusClient interface {
 	AckNotification(ctx context.Context, id string) error
 	ContinueNotification(ctx context.Context, item NotificationResponse) error
 	ContinueSession(ctx context.Context, session SessionResponse) error
+	CloseSession(ctx context.Context, session SessionResponse) error
 }
 
 type LocalClient struct {
@@ -118,13 +119,20 @@ func (c *LocalClient) ContinueNotification(ctx context.Context, item Notificatio
 }
 
 func (c *LocalClient) ContinueSession(ctx context.Context, session SessionResponse) error {
-	action := session.ContinueAction
+	return c.executeSessionAction(ctx, session.ContinueAction, "session continue")
+}
+
+func (c *LocalClient) CloseSession(ctx context.Context, session SessionResponse) error {
+	return c.executeSessionAction(ctx, session.CloseAction, "session close")
+}
+
+func (c *LocalClient) executeSessionAction(ctx context.Context, action *SessionActionPayload, actionName string) error {
 	if action == nil {
-		return fmt.Errorf("session continue is unavailable")
+		return fmt.Errorf("%s is unavailable", actionName)
 	}
 	endpoint := strings.TrimSpace(action.Endpoint)
 	if endpoint == "" {
-		return fmt.Errorf("session continue endpoint is missing")
+		return fmt.Errorf("%s endpoint is missing", actionName)
 	}
 	method := strings.ToUpper(strings.TrimSpace(action.Method))
 	if method == "" {
@@ -155,7 +163,7 @@ func (c *LocalClient) ContinueSession(ctx context.Context, session SessionRespon
 	c.handler.ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK {
 		body, _ := io.ReadAll(rec.Body)
-		return fmt.Errorf("session continue failed: %s: %s", rec.Result().Status, strings.TrimSpace(string(body)))
+		return fmt.Errorf("%s failed: %s: %s", actionName, rec.Result().Status, strings.TrimSpace(string(body)))
 	}
 	return nil
 }

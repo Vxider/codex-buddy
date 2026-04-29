@@ -120,13 +120,22 @@ func (c *Client) ContinueNotification(ctx context.Context, item NotificationResp
 
 func (c *Client) ContinueSession(ctx context.Context, session SessionResponse) error {
 	action := session.ContinueAction
+	return c.executeSessionAction(ctx, session, action, "session continue")
+}
+
+func (c *Client) CloseSession(ctx context.Context, session SessionResponse) error {
+	action := session.CloseAction
+	return c.executeSessionAction(ctx, session, action, "session close")
+}
+
+func (c *Client) executeSessionAction(ctx context.Context, session SessionResponse, action *SessionActionPayload, actionName string) error {
 	if action == nil {
-		return fmt.Errorf("session continue is unavailable")
+		return fmt.Errorf("%s is unavailable", actionName)
 	}
 
 	endpoint := strings.TrimSpace(action.Endpoint)
 	if endpoint == "" {
-		return fmt.Errorf("session continue endpoint is missing")
+		return fmt.Errorf("%s endpoint is missing", actionName)
 	}
 	method := strings.ToUpper(strings.TrimSpace(action.Method))
 	if method == "" {
@@ -157,7 +166,7 @@ func (c *Client) ContinueSession(ctx context.Context, session SessionResponse) e
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, 2048))
-		return fmt.Errorf("session continue failed: %s: %s", resp.Status, strings.TrimSpace(string(body)))
+		return fmt.Errorf("%s failed: %s: %s", actionName, resp.Status, strings.TrimSpace(string(body)))
 	}
 	return nil
 }

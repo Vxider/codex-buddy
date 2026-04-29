@@ -14,6 +14,10 @@ type ContinueExecutor interface {
 	Continue(session model.SessionSnapshot, text string) error
 }
 
+type SessionCloser interface {
+	Close(session model.SessionSnapshot) error
+}
+
 type SessionOpenChecker interface {
 	IsOpen(session model.SessionSnapshot) bool
 }
@@ -55,6 +59,32 @@ func (e *TmuxContinueExecutor) Continue(session model.SessionSnapshot, text stri
 	cmd := exec.Command("tmux", "send-keys", "-t", paneID, text, "Enter")
 	if output, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("tmux send-keys failed: %w: %s", err, strings.TrimSpace(string(output)))
+	}
+
+	return nil
+}
+
+func (e *TmuxContinueExecutor) Close(session model.SessionSnapshot) error {
+	paneID := strings.TrimSpace(session.TmuxPane)
+	if paneID == "" {
+		return fmt.Errorf("session %s is not bound to a tmux pane", session.SessionID)
+	}
+
+	dead, err := tmuxPaneDead(paneID)
+	if err != nil {
+		return err
+	}
+	if dead {
+		return fmt.Errorf("tmux pane %s is already closed", paneID)
+	}
+
+	if e.logger != nil {
+		e.logger.Printf("tmux close session=%s pane=%s", session.SessionID, paneID)
+	}
+
+	cmd := exec.Command("tmux", "kill-pane", "-t", paneID)
+	if output, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("tmux kill-pane failed: %w: %s", err, strings.TrimSpace(string(output)))
 	}
 
 	return nil

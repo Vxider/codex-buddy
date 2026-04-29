@@ -10,6 +10,7 @@ import (
 	"image/color"
 	"log"
 	"math/rand"
+	"os/exec"
 	"sort"
 	"strconv"
 	"strings"
@@ -67,44 +68,46 @@ type App struct {
 	darkMode                 bool
 	selectedSettingsServerID string
 
-	refreshMu             sync.Mutex
-	refreshing            bool
-	bgFill                *canvas.Rectangle
-	cardFills             []*canvas.Rectangle
-	cardBorders           []*canvas.Rectangle
-	openSessionCardBorder *canvas.Rectangle
-	sessionCardBorder     *canvas.Rectangle
-	badgeFill             *canvas.Rectangle
-	badgeLabel            *canvas.Text
-	updatedLabel          *widget.Label
-	serverStrip           *fyne.Container
-	openSessionSection    *fyne.Container
-	openSessionList       *fyne.Container
-	sessionList           *fyne.Container
-	themeButton           *widget.Button
-	refreshButton         *widget.Button
-	settingsButton        *widget.Button
-	serverButton          *widget.Button
-	refreshActivity       *widget.Activity
-	rootScroll            *container.Scroll
-	settingsSummary       *widget.Label
-	settingsList          *fyne.Container
-	tailscaleState        tailscaleState
-	exitNodeButton        *splitBadgeButton
-	exitNodeMenu          *fyne.Container
-	exitNodeMenuOpen      bool
-	tailscaleBusy         bool
-	openShortcutBySession map[string]fyne.KeyName
-	openSessionByShortcut map[fyne.KeyName]string
-	openActionPending     map[string]bool
-	openHoldStop          chan struct{}
-	openHoldKey           fyne.KeyName
-	openHoldSessionKey    string
-	openHoldProgress      float64
-	shortcutRand          *rand.Rand
-	scrollHoldMu          sync.Mutex
-	scrollHoldStop        chan struct{}
-	scrollHoldKey         fyne.KeyName
+	refreshMu              sync.Mutex
+	refreshing             bool
+	bgFill                 *canvas.Rectangle
+	cardFills              []*canvas.Rectangle
+	cardBorders            []*canvas.Rectangle
+	openSessionCardBorder  *canvas.Rectangle
+	sessionCardBorder      *canvas.Rectangle
+	badgeFill              *canvas.Rectangle
+	badgeLabel             *canvas.Text
+	updatedLabel           *widget.Label
+	serverStrip            *fyne.Container
+	openSessionSection     *fyne.Container
+	openSessionList        *fyne.Container
+	openStickyRows         []*stickySessionRow
+	openSessionStickyLayer *fyne.Container
+	sessionList            *fyne.Container
+	themeButton            *widget.Button
+	refreshButton          *widget.Button
+	settingsButton         *widget.Button
+	serverButton           *widget.Button
+	refreshActivity        *widget.Activity
+	rootScroll             *container.Scroll
+	settingsSummary        *widget.Label
+	settingsList           *fyne.Container
+	tailscaleState         tailscaleState
+	exitNodeButton         *splitBadgeButton
+	exitNodeMenu           *fyne.Container
+	exitNodeMenuOpen       bool
+	tailscaleBusy          bool
+	openShortcutByAction   map[string]fyne.KeyName
+	openActionByShortcut   map[fyne.KeyName]string
+	openActionPending      map[string]bool
+	openHoldStop           chan struct{}
+	openHoldKey            fyne.KeyName
+	openHoldActionKey      string
+	openHoldProgress       float64
+	shortcutRand           *rand.Rand
+	scrollHoldMu           sync.Mutex
+	scrollHoldStop         chan struct{}
+	scrollHoldKey          fyne.KeyName
 }
 
 type serverSnapshot struct {
@@ -176,16 +179,41 @@ type splitBadgeButtonRenderer struct {
 }
 
 type sessionListState struct {
-	shortcuts      map[string]fyne.KeyName
-	pending        map[string]bool
-	holdSessionKey string
-	holdProgress   float64
-	holdLabel      string
+	shortcuts     map[string]fyne.KeyName
+	pending       map[string]bool
+	holdActionKey string
+	holdProgress  float64
+	holdLabel     string
 }
+
+type openSessionActionKind string
+
+const (
+	openSessionActionContinue openSessionActionKind = "continue"
+	openSessionActionClose    openSessionActionKind = "close"
+	openSessionActionJump     openSessionActionKind = "jump"
+)
 
 type sessionGridLayout struct {
 	minColumnWidth float32
 	gap            float32
+}
+
+type stickySessionRow struct {
+	session      SessionResponse
+	root         *fyne.Container
+	headerBG     *canvas.Rectangle
+	header       fyne.CanvasObject
+	body         fyne.CanvasObject
+	sideInset    float32
+	topInset     float32
+	bottomInset  float32
+	stickyOffset float32
+	stickyActive bool
+}
+
+type stickySessionRowLayout struct {
+	row *stickySessionRow
 }
 
 type markdownSpan struct {
@@ -342,6 +370,65 @@ func (l sessionGridLayout) spacing() float32 {
 		return l.gap
 	}
 	return theme.Padding()
+}
+
+func (l stickySessionRowLayout) Layout(_ []fyne.CanvasObject, size fyne.Size) {
+	if l.row == nil {
+		return
+	}
+
+	row := l.row
+	headerSize := row.header.MinSize()
+	headerY := row.topInset
+	if row.stickyActive {
+		headerY += row.stickyOffset
+	}
+
+	innerWidth := size.Width - row.sideInset*2
+	if innerWidth < 0 {
+		innerWidth = 0
+	}
+
+	row.headerBG.Move(fyne.NewPos(0, headerY))
+	row.headerBG.Resize(fyne.NewSize(size.Width, headerSize.Height))
+
+	row.header.Move(fyne.NewPos(row.sideInset, headerY))
+	row.header.Resize(fyne.NewSize(innerWidth, headerSize.Height))
+
+	bodyTop := row.topInset + headerSize.Height
+	if row.body.MinSize().Height > 0 {
+		bodyTop += theme.Padding()
+	}
+
+	bodyHeight := size.Height - bodyTop - row.bottomInset
+	if bodyHeight < 0 {
+		bodyHeight = 0
+	}
+	row.body.Move(fyne.NewPos(row.sideInset, bodyTop))
+	row.body.Resize(fyne.NewSize(innerWidth, bodyHeight))
+}
+
+func (l stickySessionRowLayout) MinSize(_ []fyne.CanvasObject) fyne.Size {
+	if l.row == nil {
+		return fyne.Size{}
+	}
+
+	row := l.row
+	headerSize := row.header.MinSize()
+	bodySize := row.body.MinSize()
+
+	width := headerSize.Width
+	if bodySize.Width > width {
+		width = bodySize.Width
+	}
+	width += row.sideInset * 2
+
+	height := row.topInset + headerSize.Height + row.bottomInset
+	if bodySize.Height > 0 {
+		height += theme.Padding() + bodySize.Height
+	}
+
+	return fyne.NewSize(width, height)
 }
 
 func visibleObjects(objects []fyne.CanvasObject) []fyne.CanvasObject {
@@ -1084,19 +1171,19 @@ func Run(ctx context.Context, rootCfg config.Config, configPath string, logger *
 	defer cancel()
 
 	gui := &App{
-		rootCfg:               rootCfg,
-		configPath:            configPath,
-		cfg:                   cfg,
-		logger:                logger,
-		clients:               make(map[string]statusClient),
-		serverSnapshots:       make(map[string]serverSnapshot),
-		openShortcutBySession: make(map[string]fyne.KeyName),
-		openSessionByShortcut: make(map[fyne.KeyName]string),
-		openActionPending:     make(map[string]bool),
-		shortcutRand:          rand.New(rand.NewSource(time.Now().UnixNano())),
-		lastStatus:            offlineStatus(),
-		statusLine:            "Connecting to codex-buddy",
-		darkMode:              true,
+		rootCfg:              rootCfg,
+		configPath:           configPath,
+		cfg:                  cfg,
+		logger:               logger,
+		clients:              make(map[string]statusClient),
+		serverSnapshots:      make(map[string]serverSnapshot),
+		openShortcutByAction: make(map[string]fyne.KeyName),
+		openActionByShortcut: make(map[fyne.KeyName]string),
+		openActionPending:    make(map[string]bool),
+		shortcutRand:         rand.New(rand.NewSource(time.Now().UnixNano())),
+		lastStatus:           offlineStatus(),
+		statusLine:           "Connecting to codex-buddy",
+		darkMode:             true,
 	}
 	gui.localRuntime = engine.NewRuntime(rootCfg, logger)
 	gui.localRuntime.Start(childCtx)
@@ -1233,6 +1320,12 @@ func (a *App) buildUI() fyne.CanvasObject {
 		a.sectionCard("Sessions", darkMode, a.sessionList, &a.sessionCardBorder),
 	)
 	a.rootScroll = container.NewVScroll(content)
+	a.rootScroll.OnScrolled = func(fyne.Position) {
+		a.refreshOpenSessionStickyRows()
+	}
+	a.openSessionStickyLayer = container.NewWithoutLayout()
+	a.openSessionStickyLayer.Hide()
+	scrollArea := container.NewStack(a.rootScroll, a.openSessionStickyLayer)
 
 	header := container.NewBorder(
 		nil,
@@ -1250,7 +1343,7 @@ func (a *App) buildUI() fyne.CanvasObject {
 	return container.NewMax(
 		a.bgFill,
 		container.NewPadded(
-			container.NewBorder(topBar, nil, nil, nil, a.rootScroll),
+			container.NewBorder(topBar, nil, nil, nil, scrollArea),
 		),
 	)
 }
@@ -1430,29 +1523,28 @@ func (a *App) handleOpenShortcutKeyDown(key fyne.KeyName) {
 	}
 
 	a.stateMu.RLock()
-	sessionKey, ok := a.openSessionByShortcut[key]
-	if !ok || a.openActionPending[sessionKey] {
+	actionKey, ok := a.openActionByShortcut[key]
+	if !ok || a.openActionPending[actionKey] {
 		a.stateMu.RUnlock()
 		return
 	}
-	if a.openHoldKey == key && a.openHoldSessionKey == sessionKey {
+	if a.openHoldKey == key && a.openHoldActionKey == actionKey {
 		a.stateMu.RUnlock()
 		return
 	}
+	sessionKey, kind := parseOpenSessionActionKey(actionKey)
 	session := findSessionByActionKey(a.lastStatus.Sessions, sessionKey)
 	a.stateMu.RUnlock()
-	if session == nil || !canContinueSession(*session) {
+	if session == nil || !isOpenSessionActionAvailable(*session, kind) {
 		return
 	}
 
-	a.startOpenShortcutHold(key, *session)
+	a.startOpenShortcutHold(key, actionKey, *session, kind)
 }
 
-func (a *App) startOpenShortcutHold(key fyne.KeyName, session SessionResponse) {
-	sessionKey := sessionActionKey(session)
-
+func (a *App) startOpenShortcutHold(key fyne.KeyName, actionKey string, session SessionResponse, kind openSessionActionKind) {
 	a.stateMu.Lock()
-	if a.openHoldKey == key && a.openHoldSessionKey == sessionKey {
+	if a.openHoldKey == key && a.openHoldActionKey == actionKey {
 		a.stateMu.Unlock()
 		return
 	}
@@ -1462,12 +1554,12 @@ func (a *App) startOpenShortcutHold(key fyne.KeyName, session SessionResponse) {
 	stop := make(chan struct{})
 	a.openHoldStop = stop
 	a.openHoldKey = key
-	a.openHoldSessionKey = sessionKey
+	a.openHoldActionKey = actionKey
 	a.openHoldProgress = 0
 	a.stateMu.Unlock()
 	fyne.Do(a.render)
 
-	go func(stop <-chan struct{}, key fyne.KeyName, session SessionResponse, sessionKey string) {
+	go func(stop <-chan struct{}, key fyne.KeyName, actionKey string, session SessionResponse, kind openSessionActionKind) {
 		startedAt := time.Now()
 		ticker := time.NewTicker(40 * time.Millisecond)
 		defer ticker.Stop()
@@ -1485,7 +1577,7 @@ func (a *App) startOpenShortcutHold(key fyne.KeyName, session SessionResponse) {
 
 				var shouldApprove bool
 				a.stateMu.Lock()
-				if a.openHoldKey != key || a.openHoldSessionKey != sessionKey {
+				if a.openHoldKey != key || a.openHoldActionKey != actionKey {
 					a.stateMu.Unlock()
 					return
 				}
@@ -1498,28 +1590,28 @@ func (a *App) startOpenShortcutHold(key fyne.KeyName, session SessionResponse) {
 					continue
 				}
 
-				a.clearOpenShortcutHold(key, sessionKey)
-				go a.executeSessionContinue(session)
+				a.clearOpenShortcutHold(key, actionKey)
+				go a.executeOpenSessionAction(session, kind)
 				return
 			}
 		}
-	}(stop, key, session, sessionKey)
+	}(stop, key, actionKey, session, kind)
 }
 
 func (a *App) stopOpenShortcutHold(key fyne.KeyName) {
 	a.stateMu.RLock()
-	sessionKey := a.openHoldSessionKey
+	actionKey := a.openHoldActionKey
 	active := a.openHoldKey == key
 	a.stateMu.RUnlock()
 	if !active {
 		return
 	}
-	a.clearOpenShortcutHold(key, sessionKey)
+	a.clearOpenShortcutHold(key, actionKey)
 }
 
-func (a *App) clearOpenShortcutHold(key fyne.KeyName, sessionKey string) {
+func (a *App) clearOpenShortcutHold(key fyne.KeyName, actionKey string) {
 	a.stateMu.Lock()
-	if a.openHoldKey != key || a.openHoldSessionKey != sessionKey {
+	if a.openHoldKey != key || a.openHoldActionKey != actionKey {
 		a.stateMu.Unlock()
 		return
 	}
@@ -1528,26 +1620,26 @@ func (a *App) clearOpenShortcutHold(key fyne.KeyName, sessionKey string) {
 	}
 	a.openHoldStop = nil
 	a.openHoldKey = ""
-	a.openHoldSessionKey = ""
+	a.openHoldActionKey = ""
 	a.openHoldProgress = 0
 	a.stateMu.Unlock()
 	fyne.Do(a.render)
 }
 
-func (a *App) startSessionContinuePending(sessionKey string) bool {
+func (a *App) startOpenSessionActionPending(actionKey string) bool {
 	a.stateMu.Lock()
 	defer a.stateMu.Unlock()
-	if a.openActionPending[sessionKey] {
+	if a.openActionPending[actionKey] {
 		return false
 	}
-	a.openActionPending[sessionKey] = true
+	a.openActionPending[actionKey] = true
 	fyne.Do(a.render)
 	return true
 }
 
-func (a *App) finishSessionContinuePending(sessionKey string) {
+func (a *App) finishOpenSessionActionPending(actionKey string) {
 	a.stateMu.Lock()
-	delete(a.openActionPending, sessionKey)
+	delete(a.openActionPending, actionKey)
 	a.stateMu.Unlock()
 	fyne.Do(a.render)
 }
@@ -1984,30 +2076,96 @@ func (a *App) renderServerStrip(snapshots []serverSnapshot, darkMode bool) {
 	a.serverStrip.Refresh()
 }
 
-func (a *App) renderSessionList(openSessions, otherSessions []SessionResponse, darkMode bool) {
+func (a *App) currentOpenSessionListState() sessionListState {
 	a.stateMu.RLock()
-	view := sessionListState{
-		shortcuts:      cloneShortcutMap(a.openShortcutBySession),
-		pending:        clonePendingMap(a.openActionPending),
-		holdSessionKey: a.openHoldSessionKey,
-		holdProgress:   a.openHoldProgress,
-		holdLabel:      holdDurationLabel(a.openShortcutHoldDuration()),
+	defer a.stateMu.RUnlock()
+	return sessionListState{
+		shortcuts:     cloneShortcutMap(a.openShortcutByAction),
+		pending:       clonePendingMap(a.openActionPending),
+		holdActionKey: a.openHoldActionKey,
+		holdProgress:  a.openHoldProgress,
+		holdLabel:     holdDurationLabel(a.openShortcutHoldDuration()),
 	}
-	a.stateMu.RUnlock()
+}
+
+func (a *App) renderSessionList(openSessions, otherSessions []SessionResponse, darkMode bool) {
+	view := a.currentOpenSessionListState()
 
 	if a.openSessionSection != nil && a.openSessionList != nil {
 		if len(openSessions) == 0 {
+			a.openStickyRows = nil
+			if a.openSessionStickyLayer != nil {
+				a.openSessionStickyLayer.Objects = nil
+				a.openSessionStickyLayer.Hide()
+			}
 			a.openSessionSection.Hide()
 		} else {
-			a.openSessionList.Objects = openSessionListObjects(openSessions, darkMode, view)
+			objects, stickyRows := openSessionListObjects(openSessions, darkMode, view)
+			a.openStickyRows = stickyRows
+			a.openSessionList.Objects = objects
 			a.openSessionList.Refresh()
 			a.openSessionSection.Show()
 			a.openSessionSection.Refresh()
+			a.refreshOpenSessionStickyRows()
 		}
 	}
 
 	a.sessionList.Objects = sessionListObjects(otherSessions, len(openSessions) > 0, darkMode)
 	a.sessionList.Refresh()
+}
+
+func (a *App) refreshOpenSessionStickyRows() {
+	if a.rootScroll == nil || a.openSessionStickyLayer == nil || len(a.openStickyRows) == 0 {
+		return
+	}
+	if a.rootScroll.Content == nil || a.rootScroll.Offset.Y <= 0 {
+		a.openSessionStickyLayer.Objects = nil
+		a.openSessionStickyLayer.Hide()
+		a.openSessionStickyLayer.Refresh()
+		return
+	}
+
+	driver := fyne.CurrentApp().Driver()
+	contentTop := driver.AbsolutePositionForObject(a.rootScroll.Content).Y
+	viewportOffsetTop := a.rootScroll.Offset.Y
+	var active *stickySessionRow
+
+	for _, row := range a.openStickyRows {
+		if row == nil || row.root == nil {
+			continue
+		}
+
+		rowTop := driver.AbsolutePositionForObject(row.root).Y - contentTop
+		rowBottom := rowTop + row.root.Size().Height
+		headerTop := rowTop + row.topInset
+
+		row.setStickyState(false, 0)
+		if active != nil {
+			continue
+		}
+		if rowBottom > viewportOffsetTop && headerTop < viewportOffsetTop {
+			active = row
+		}
+	}
+
+	if active == nil {
+		a.openSessionStickyLayer.Objects = nil
+		a.openSessionStickyLayer.Hide()
+		a.openSessionStickyLayer.Refresh()
+		return
+	}
+
+	view := a.currentOpenSessionListState()
+	darkMode := a.effectiveDarkMode()
+	header := buildOpenSessionHeader(active.session, darkMode, view)
+	fill := canvas.NewRectangle(cardFill(darkMode))
+	fill.CornerRadius = 10
+	panel := container.NewStack(fill, container.NewPadded(header))
+	panel.Resize(fyne.NewSize(a.rootScroll.Size().Width, panel.MinSize().Height))
+	panel.Move(fyne.NewPos(0, 0))
+	a.openSessionStickyLayer.Objects = []fyne.CanvasObject{panel}
+	a.openSessionStickyLayer.Show()
+	a.openSessionStickyLayer.Refresh()
 }
 
 func (a *App) runManualRefresh() {
@@ -2094,27 +2252,112 @@ func (a *App) executeContinue(item NotificationResponse) {
 	_ = a.refreshNow(context.Background(), true)
 }
 
-func (a *App) executeSessionContinue(session SessionResponse) {
-	sessionKey := sessionActionKey(session)
-	if !a.startSessionContinuePending(sessionKey) {
+func (a *App) executeOpenSessionAction(session SessionResponse, kind openSessionActionKind) {
+	actionKey := openSessionActionKey(session, kind)
+	if !a.startOpenSessionActionPending(actionKey) {
 		return
+	}
+	defer a.finishOpenSessionActionPending(actionKey)
+
+	switch kind {
+	case openSessionActionContinue:
+		client := a.clientForServer(session.ServerID)
+		if client == nil {
+			a.setStatusLine("Selected server is unavailable")
+			return
+		}
+		a.setStatusLine("Continuing " + sessionListTitle(session) + "...")
+		if err := client.ContinueSession(context.Background(), session); err != nil {
+			a.setStatusLine(err.Error())
+			return
+		}
+		a.setStatusLine("Continue sent")
+		_ = a.refreshNow(context.Background(), true)
+	case openSessionActionClose:
+		client := a.clientForServer(session.ServerID)
+		if client == nil {
+			a.setStatusLine("Selected server is unavailable")
+			return
+		}
+		a.setStatusLine("Closing " + sessionListTitle(session) + "...")
+		if err := client.CloseSession(context.Background(), session); err != nil {
+			a.setStatusLine(err.Error())
+			return
+		}
+		a.setStatusLine("Close sent")
+		_ = a.refreshNow(context.Background(), true)
+	case openSessionActionJump:
+		a.setStatusLine("Jumping to " + sessionListTitle(session) + "...")
+		if err := jumpToTmuxSession(session); err != nil {
+			a.setStatusLine(err.Error())
+			return
+		}
+		a.setStatusLine("Tmux jumped to " + sessionListTitle(session))
+	default:
+		a.setStatusLine("Selected action is unavailable")
+	}
+}
+
+func jumpToTmuxSession(session SessionResponse) error {
+	targetSession := strings.TrimSpace(session.TmuxSession)
+	targetWindow := strings.TrimSpace(session.TmuxWindow)
+	targetPane := strings.TrimSpace(session.TmuxPane)
+	if targetSession == "" || targetPane == "" {
+		return fmt.Errorf("tmux jump is unavailable for this session")
 	}
 
-	client := a.clientForServer(session.ServerID)
-	if client == nil {
-		a.finishSessionContinuePending(sessionKey)
-		a.setStatusLine("Selected server is unavailable")
-		return
+	clientTTY, err := attachedTmuxClientTTY(targetSession)
+	if err != nil {
+		return err
+	}
+	if clientTTY == "" {
+		return fmt.Errorf("no local attached tmux client is on session %s", targetSession)
 	}
 
-	a.setStatusLine("Approving " + sessionListTitle(session) + "...")
-	if err := client.ContinueSession(context.Background(), session); err != nil {
-		a.finishSessionContinuePending(sessionKey)
-		a.setStatusLine(err.Error())
-		return
+	if err := runTmux("switch-client", "-c", clientTTY, "-t", targetSession); err != nil {
+		return err
 	}
-	a.setStatusLine("Approve sent")
-	_ = a.refreshNow(context.Background(), true)
+	if targetWindow != "" {
+		if err := runTmux("select-window", "-t", targetWindow); err != nil {
+			return err
+		}
+	}
+	if err := runTmux("select-pane", "-t", targetPane); err != nil {
+		return err
+	}
+	return nil
+}
+
+func attachedTmuxClientTTY(targetSession string) (string, error) {
+	cmd := exec.Command("tmux", "list-clients", "-F", "#{client_tty}\t#{session_name}")
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return "", fmt.Errorf("tmux list-clients failed: %s", strings.TrimSpace(string(output)))
+	}
+
+	for _, line := range strings.Split(string(output), "\n") {
+		fields := strings.Split(strings.TrimSpace(line), "\t")
+		if len(fields) != 2 {
+			continue
+		}
+		if strings.TrimSpace(fields[1]) != targetSession {
+			continue
+		}
+		tty := strings.TrimSpace(fields[0])
+		if tty != "" {
+			return tty, nil
+		}
+	}
+	return "", nil
+}
+
+func runTmux(args ...string) error {
+	cmd := exec.Command("tmux", args...)
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("tmux %s failed: %s", strings.Join(args, " "), strings.TrimSpace(string(output)))
+	}
+	return nil
 }
 
 func (a *App) ackNotification(item NotificationResponse) {
@@ -2753,22 +2996,23 @@ func (a *App) replaceServers(servers []BuddyServer, persist bool) {
 }
 
 func (a *App) syncOpenSessionShortcutsLocked(sessions []SessionResponse) {
-	activeSessions := make(map[string]bool)
-	nextBySession := make(map[string]fyne.KeyName)
+	activeActions := make(map[string]bool)
+	nextByAction := make(map[string]fyne.KeyName)
 	usedKeys := make(map[fyne.KeyName]bool)
 
 	for _, session := range sessions {
 		if !isOpenSession(session) {
 			continue
 		}
-		sessionKey := sessionActionKey(session)
-		activeSessions[sessionKey] = true
-		if a.openActionPending[sessionKey] {
-			continue
-		}
-		if key, ok := a.openShortcutBySession[sessionKey]; ok && key != "" && !usedKeys[key] {
-			nextBySession[sessionKey] = key
-			usedKeys[key] = true
+		for _, actionKey := range openSessionActionKeys(session) {
+			activeActions[actionKey] = true
+			if a.openActionPending[actionKey] {
+				continue
+			}
+			if key, ok := a.openShortcutByAction[actionKey]; ok && key != "" && !usedKeys[key] {
+				nextByAction[actionKey] = key
+				usedKeys[key] = true
+			}
 		}
 	}
 
@@ -2777,47 +3021,48 @@ func (a *App) syncOpenSessionShortcutsLocked(sessions []SessionResponse) {
 		if !isOpenSession(session) {
 			continue
 		}
-		sessionKey := sessionActionKey(session)
-		if a.openActionPending[sessionKey] {
-			continue
+		for _, actionKey := range openSessionActionKeys(session) {
+			if a.openActionPending[actionKey] {
+				continue
+			}
+			if _, ok := nextByAction[actionKey]; ok {
+				continue
+			}
+			if len(available) == 0 {
+				break
+			}
+			nextByAction[actionKey] = available[0]
+			usedKeys[available[0]] = true
+			available = available[1:]
 		}
-		if _, ok := nextBySession[sessionKey]; ok {
-			continue
-		}
-		if len(available) == 0 {
-			break
-		}
-		nextBySession[sessionKey] = available[0]
-		usedKeys[available[0]] = true
-		available = available[1:]
 	}
 
-	nextByShortcut := make(map[fyne.KeyName]string, len(nextBySession))
-	for sessionKey, key := range nextBySession {
-		nextByShortcut[key] = sessionKey
+	nextByShortcut := make(map[fyne.KeyName]string, len(nextByAction))
+	for actionKey, key := range nextByAction {
+		nextByShortcut[key] = actionKey
 	}
 
-	if a.openHoldSessionKey != "" {
-		assignedKey, ok := nextBySession[a.openHoldSessionKey]
+	if a.openHoldActionKey != "" {
+		assignedKey, ok := nextByAction[a.openHoldActionKey]
 		if !ok || assignedKey != a.openHoldKey {
 			if a.openHoldStop != nil {
 				close(a.openHoldStop)
 			}
 			a.openHoldStop = nil
 			a.openHoldKey = ""
-			a.openHoldSessionKey = ""
+			a.openHoldActionKey = ""
 			a.openHoldProgress = 0
 		}
 	}
 
-	for sessionKey := range a.openActionPending {
-		if !activeSessions[sessionKey] {
-			delete(a.openActionPending, sessionKey)
+	for actionKey := range a.openActionPending {
+		if !activeActions[actionKey] {
+			delete(a.openActionPending, actionKey)
 		}
 	}
 
-	a.openShortcutBySession = nextBySession
-	a.openSessionByShortcut = nextByShortcut
+	a.openShortcutByAction = nextByAction
+	a.openActionByShortcut = nextByShortcut
 }
 
 func shuffledShortcutKeys(rng *rand.Rand, used map[fyne.KeyName]bool) []fyne.KeyName {
@@ -2988,13 +3233,10 @@ func serverStripObjects(snapshots []serverSnapshot, darkMode bool) []fyne.Canvas
 	return objects
 }
 
-func splitSessionsByOpenState(sessions []SessionResponse, hidden map[string]bool) ([]SessionResponse, []SessionResponse) {
+func splitSessionsByOpenState(sessions []SessionResponse, _ map[string]bool) ([]SessionResponse, []SessionResponse) {
 	openSessions := make([]SessionResponse, 0, len(sessions))
 	otherSessions := make([]SessionResponse, 0, len(sessions))
 	for _, session := range sessions {
-		if hidden[sessionActionKey(session)] {
-			continue
-		}
 		if isOpenSession(session) {
 			openSessions = append(openSessions, session)
 			continue
@@ -3004,18 +3246,21 @@ func splitSessionsByOpenState(sessions []SessionResponse, hidden map[string]bool
 	return openSessions, otherSessions
 }
 
-func openSessionListObjects(sessions []SessionResponse, darkMode bool, state sessionListState) []fyne.CanvasObject {
-	objects := []fyne.CanvasObject{metaText("Hold the shown letter to approve.", darkMode)}
+func openSessionListObjects(sessions []SessionResponse, darkMode bool, state sessionListState) ([]fyne.CanvasObject, []*stickySessionRow) {
+	objects := []fyne.CanvasObject{metaText("Hold a shown letter to continue, close, or jump.", darkMode)}
+	rows := make([]*stickySessionRow, 0, len(sessions))
 	if len(sessions) > 0 {
 		objects = append(objects, widget.NewSeparator())
 	}
 	for i, session := range sessions {
-		objects = append(objects, container.NewPadded(openSessionRow(session, darkMode, state)))
+		row := openSessionRow(session, darkMode, state)
+		rows = append(rows, row)
+		objects = append(objects, row.root)
 		if i < len(sessions)-1 {
 			objects = append(objects, widget.NewSeparator())
 		}
 	}
-	return objects
+	return objects, rows
 }
 
 func sessionListObjects(sessions []SessionResponse, hasOpenSessions bool, darkMode bool) []fyne.CanvasObject {
@@ -3033,35 +3278,12 @@ func sessionListObjects(sessions []SessionResponse, hasOpenSessions bool, darkMo
 	return objects
 }
 
-func openSessionRow(session SessionResponse, darkMode bool, state sessionListState) fyne.CanvasObject {
-	sessionKey := sessionActionKey(session)
-	shortcutKey := state.shortcuts[sessionKey]
-	isPending := state.pending[sessionKey]
-	isHolding := state.holdSessionKey == sessionKey && state.holdProgress > 0
-
-	title := widget.NewLabelWithStyle(sessionListTitle(session), fyne.TextAlignLeading, fyne.TextStyle{Bold: true})
-	title.Wrapping = fyne.TextWrapOff
-	title.Truncation = fyne.TextTruncateEllipsis
-
-	badges := container.NewHBox(
-		sourceBadge(session.ServerName, session.ServerID, darkMode),
-		openShortcutBadge(shortcutKey, isHolding, isPending),
-	)
-
-	header := container.NewBorder(nil, nil, nil, badges, title)
+func openSessionRow(session SessionResponse, darkMode bool, state sessionListState) *stickySessionRow {
+	header := buildOpenSessionHeader(session, darkMode, state)
 
 	summary := sessionSummaryObject(session, darkMode, "Waiting for approval")
 
-	hintText := "No shortcut available"
-	switch {
-	case isPending:
-		hintText = "Approving..."
-	case shortcutKey != "":
-		hintText = "Hold " + strings.ToUpper(string(shortcutKey)) + " for " + state.holdLabel + " to approve"
-	}
-	if !canContinueSession(session) && !isPending {
-		hintText = "Continue is unavailable"
-	}
+	hintText := openSessionActionHintText(session, state)
 
 	objects := []fyne.CanvasObject{
 		header,
@@ -3073,42 +3295,106 @@ func openSessionRow(session SessionResponse, darkMode bool, state sessionListSta
 		),
 	}
 
-	if isHolding {
+	if state.holdActionKey != "" && strings.HasPrefix(state.holdActionKey, sessionActionKey(session)+"|") {
 		progress := widget.NewProgressBar()
 		progress.TextFormatter = func() string { return "" }
 		progress.SetValue(state.holdProgress)
 		objects = append(objects, progress)
 	}
 
-	return container.NewVBox(objects...)
+	row := newStickySessionRow(header, container.NewVBox(objects[1:]...), darkMode)
+	row.session = session
+	return row
 }
 
-func openShortcutBadge(key fyne.KeyName, active bool, pending bool) fyne.CanvasObject {
-	label := "-"
+func buildOpenSessionHeader(session SessionResponse, darkMode bool, state sessionListState) fyne.CanvasObject {
+	title := widget.NewLabelWithStyle(sessionListTitle(session), fyne.TextAlignLeading, fyne.TextStyle{Bold: true})
+	title.Wrapping = fyne.TextWrapOff
+	title.Truncation = fyne.TextTruncateEllipsis
+
+	actionBadges := []fyne.CanvasObject{sourceBadge(session.ServerName, session.ServerID, darkMode)}
+	for _, kind := range []openSessionActionKind{
+		openSessionActionContinue,
+		openSessionActionClose,
+		openSessionActionJump,
+	} {
+		actionKey := openSessionActionKey(session, kind)
+		actionBadges = append(actionBadges, openSessionActionBadge(
+			kind,
+			state.shortcuts[actionKey],
+			state.holdActionKey == actionKey && state.holdProgress > 0,
+			state.pending[actionKey],
+			isOpenSessionActionAvailable(session, kind),
+		))
+	}
+	badges := container.NewHBox(actionBadges...)
+	return container.NewBorder(nil, nil, nil, badges, title)
+}
+
+func newStickySessionRow(header fyne.CanvasObject, body fyne.CanvasObject, darkMode bool) *stickySessionRow {
+	padding := theme.Padding()
+	row := &stickySessionRow{
+		session:     SessionResponse{},
+		headerBG:    canvas.NewRectangle(cardFill(darkMode)),
+		header:      header,
+		body:        body,
+		sideInset:   padding,
+		topInset:    padding,
+		bottomInset: padding,
+	}
+	row.headerBG.Hide()
+	row.root = container.New(&stickySessionRowLayout{row: row}, row.headerBG, row.body, row.header)
+	return row
+}
+
+func (r *stickySessionRow) setStickyState(active bool, offset float32) {
+	if !active {
+		offset = 0
+	}
+	if r.stickyActive == active && r.stickyOffset == offset {
+		return
+	}
+	r.stickyActive = active
+	r.stickyOffset = offset
+	if active {
+		r.headerBG.Show()
+	} else {
+		r.headerBG.Hide()
+	}
+	r.root.Refresh()
+}
+
+func openSessionActionBadge(kind openSessionActionKind, key fyne.KeyName, active bool, pending bool, enabled bool) fyne.CanvasObject {
+	label := openSessionActionLabel(kind)
 	fill := color.NRGBA{R: 0x4A, G: 0x4B, B: 0x50, A: 0xFF}
 	textColor := color.Color(color.White)
+	display := label + " -"
 
 	switch {
 	case pending:
-		label = "..."
+		display = label + "..."
 		fill = color.NRGBA{R: 0x2D, G: 0x7A, B: 0x52, A: 0xFF}
+	case !enabled:
+		display = label + " off"
+		textColor = color.NRGBA{R: 0xCF, G: 0xD4, B: 0xDB, A: 0xFF}
 	case key != "":
-		label = strings.ToUpper(string(key))
+		display = label + " " + strings.ToUpper(string(key))
 		if active {
 			fill = color.NRGBA{R: 0xBC, G: 0x7A, B: 0x00, A: 0xFF}
 		}
 	default:
+		display = label + " -"
 		textColor = color.NRGBA{R: 0xCF, G: 0xD4, B: 0xDB, A: 0xFF}
 	}
 
 	bg := canvas.NewRectangle(fill)
-	bg.SetMinSize(fyne.NewSize(54, 32))
+	bg.SetMinSize(fyne.NewSize(132, 32))
 	bg.CornerRadius = 10
 
-	text := canvas.NewText(label, textColor)
+	text := canvas.NewText(display, textColor)
 	text.Alignment = fyne.TextAlignCenter
 	text.TextStyle = fyne.TextStyle{Bold: true}
-	text.TextSize = 22
+	text.TextSize = 18
 
 	return container.NewStack(bg, container.NewCenter(text))
 }
@@ -4360,6 +4646,121 @@ func canContinueSession(session SessionResponse) bool {
 	return session.CanContinue && session.ContinueAction != nil
 }
 
+func canCloseSession(session SessionResponse) bool {
+	return session.CanClose && session.CloseAction != nil
+}
+
+func canJumpSession(session SessionResponse) bool {
+	return strings.TrimSpace(session.TmuxSession) != "" && strings.TrimSpace(session.TmuxPane) != ""
+}
+
+func isOpenSessionActionAvailable(session SessionResponse, kind openSessionActionKind) bool {
+	switch kind {
+	case openSessionActionContinue:
+		return canContinueSession(session)
+	case openSessionActionClose:
+		return canCloseSession(session)
+	case openSessionActionJump:
+		return canJumpSession(session)
+	default:
+		return false
+	}
+}
+
+func openSessionActionLabel(kind openSessionActionKind) string {
+	switch kind {
+	case openSessionActionContinue:
+		return "Continue"
+	case openSessionActionClose:
+		return "Close"
+	case openSessionActionJump:
+		return "Jump"
+	default:
+		return "Action"
+	}
+}
+
+func openSessionActionVerb(kind openSessionActionKind) string {
+	switch kind {
+	case openSessionActionContinue:
+		return "continue"
+	case openSessionActionClose:
+		return "close"
+	case openSessionActionJump:
+		return "jump"
+	default:
+		return "run"
+	}
+}
+
+func openSessionActionKey(session SessionResponse, kind openSessionActionKind) string {
+	return sessionActionKey(session) + "|" + string(kind)
+}
+
+func parseOpenSessionActionKey(actionKey string) (string, openSessionActionKind) {
+	index := strings.LastIndex(actionKey, "|")
+	if index < 0 {
+		return actionKey, ""
+	}
+	return actionKey[:index], openSessionActionKind(actionKey[index+1:])
+}
+
+func openSessionActionKeys(session SessionResponse) []string {
+	kinds := []openSessionActionKind{
+		openSessionActionContinue,
+		openSessionActionClose,
+		openSessionActionJump,
+	}
+	keys := make([]string, 0, len(kinds))
+	for _, kind := range kinds {
+		if isOpenSessionActionAvailable(session, kind) {
+			keys = append(keys, openSessionActionKey(session, kind))
+		}
+	}
+	return keys
+}
+
+func openSessionActionHintText(session SessionResponse, state sessionListState) string {
+	for _, kind := range []openSessionActionKind{
+		openSessionActionContinue,
+		openSessionActionClose,
+		openSessionActionJump,
+	} {
+		actionKey := openSessionActionKey(session, kind)
+		if state.pending[actionKey] {
+			return strings.ToUpper(openSessionActionLabel(kind)) + " in progress..."
+		}
+		if state.holdActionKey == actionKey && state.holdProgress > 0 {
+			key := state.shortcuts[actionKey]
+			if key != "" {
+				return "Hold " + strings.ToUpper(string(key)) + " for " + state.holdLabel + " to " + openSessionActionVerb(kind)
+			}
+			return "Keep holding to " + openSessionActionVerb(kind)
+		}
+	}
+
+	available := make([]string, 0, 3)
+	for _, kind := range []openSessionActionKind{
+		openSessionActionContinue,
+		openSessionActionClose,
+		openSessionActionJump,
+	} {
+		if !isOpenSessionActionAvailable(session, kind) {
+			continue
+		}
+		key := state.shortcuts[openSessionActionKey(session, kind)]
+		if key == "" {
+			available = append(available, openSessionActionLabel(kind)+" key unavailable")
+			continue
+		}
+		available = append(available, strings.ToUpper(string(key))+" "+openSessionActionVerb(kind))
+	}
+	if len(available) == 0 {
+		return "No open-session actions are available"
+	}
+	return "Hold " + strings.Join(available, "  |  ")
+}
+
 func cloneShortcutMap(source map[string]fyne.KeyName) map[string]fyne.KeyName {
 	if len(source) == 0 {
 		return nil
@@ -4537,7 +4938,7 @@ func (a *App) showHelpDialog() {
 		"J/K  Scroll",
 		"A  Acknowledge notification",
 		"C  Continue current session",
-		"Hold open-session letter 1s  Approve session",
+		"Hold open-session letter 1s  Continue / Close / Jump",
 		"Esc  Close popup/dialog",
 	}, "\n"))
 	content.Wrapping = fyne.TextWrapWord
@@ -4568,6 +4969,7 @@ func (a *App) scrollBy(delta float32) {
 	}
 	a.rootScroll.Offset.Y = next
 	a.rootScroll.Refresh()
+	a.refreshOpenSessionStickyRows()
 }
 
 func (a *App) startScrollHold(key fyne.KeyName, delta float32) {

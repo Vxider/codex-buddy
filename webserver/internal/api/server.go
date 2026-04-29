@@ -34,32 +34,37 @@ type Server struct {
 }
 
 type publicSession struct {
-	SessionID       string                `json:"session_id"`
-	ShortSessionID  string                `json:"short_session_id,omitempty"`
-	DisplayTitle    string                `json:"display_title,omitempty"`
-	CompactTitle    string                `json:"compact_title,omitempty"`
-	MicroTitle      string                `json:"micro_title,omitempty"`
-	State           model.State           `json:"state"`
-	StateDetail     string                `json:"state_detail,omitempty"`
-	UpdatedAt       time.Time             `json:"updated_at"`
-	Summary         string                `json:"summary,omitempty"`
-	SummaryMarkdown string                `json:"summary_markdown,omitempty"`
-	SummaryHTML     string                `json:"summary_html,omitempty"`
-	CompactSummary  string                `json:"compact_summary,omitempty"`
-	MicroSummary    string                `json:"micro_summary,omitempty"`
-	NeedsOpen       bool                  `json:"needs_open"`
-	NeedsApproval   bool                  `json:"needs_approval"`
-	OpenReason      string                `json:"open_reason,omitempty"`
-	OpenSummary     string                `json:"open_summary,omitempty"`
-	OpenMarkdown    string                `json:"open_summary_markdown,omitempty"`
-	OpenHTML        string                `json:"open_summary_html,omitempty"`
-	CompactOpen     string                `json:"compact_open_summary,omitempty"`
-	MicroOpen       string                `json:"micro_open_summary,omitempty"`
-	CanContinue     bool                  `json:"can_continue"`
-	ContinueAction  *publicContinueAction `json:"continue_action,omitempty"`
+	SessionID       string               `json:"session_id"`
+	ShortSessionID  string               `json:"short_session_id,omitempty"`
+	DisplayTitle    string               `json:"display_title,omitempty"`
+	CompactTitle    string               `json:"compact_title,omitempty"`
+	MicroTitle      string               `json:"micro_title,omitempty"`
+	State           model.State          `json:"state"`
+	StateDetail     string               `json:"state_detail,omitempty"`
+	UpdatedAt       time.Time            `json:"updated_at"`
+	Summary         string               `json:"summary,omitempty"`
+	SummaryMarkdown string               `json:"summary_markdown,omitempty"`
+	SummaryHTML     string               `json:"summary_html,omitempty"`
+	CompactSummary  string               `json:"compact_summary,omitempty"`
+	MicroSummary    string               `json:"micro_summary,omitempty"`
+	NeedsOpen       bool                 `json:"needs_open"`
+	NeedsApproval   bool                 `json:"needs_approval"`
+	OpenReason      string               `json:"open_reason,omitempty"`
+	OpenSummary     string               `json:"open_summary,omitempty"`
+	OpenMarkdown    string               `json:"open_summary_markdown,omitempty"`
+	OpenHTML        string               `json:"open_summary_html,omitempty"`
+	CompactOpen     string               `json:"compact_open_summary,omitempty"`
+	MicroOpen       string               `json:"micro_open_summary,omitempty"`
+	TmuxSession     string               `json:"tmux_session,omitempty"`
+	TmuxWindow      string               `json:"tmux_window,omitempty"`
+	TmuxPane        string               `json:"tmux_pane,omitempty"`
+	CanContinue     bool                 `json:"can_continue"`
+	ContinueAction  *publicSessionAction `json:"continue_action,omitempty"`
+	CanClose        bool                 `json:"can_close"`
+	CloseAction     *publicSessionAction `json:"close_action,omitempty"`
 }
 
-type publicContinueAction struct {
+type publicSessionAction struct {
 	Method      string `json:"method"`
 	Endpoint    string `json:"endpoint"`
 	ActionToken string `json:"action_token,omitempty"`
@@ -254,6 +259,8 @@ func (s *Server) handleSession(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, s.publicSession(session, s.notificationIndex()[sessionID], sessionTitles([]model.SessionSnapshot{session})[sessionID]))
 	case len(parts) == 2 && parts[1] == "continue" && r.Method == http.MethodPost:
 		s.handleSessionContinue(w, r, parts[0])
+	case len(parts) == 2 && parts[1] == "close" && r.Method == http.MethodPost:
+		s.handleSessionClose(w, r, parts[0])
 	default:
 		http.NotFound(w, r)
 	}
@@ -395,6 +402,9 @@ func (s *Server) publicSession(session model.SessionSnapshot, notification model
 		NeedsOpen:       session.State == model.StateAttention,
 		NeedsApproval:   openReason == "approval",
 		OpenReason:      openReason,
+		TmuxSession:     strings.TrimSpace(session.TmuxSession),
+		TmuxWindow:      strings.TrimSpace(session.TmuxWindow),
+		TmuxPane:        strings.TrimSpace(session.TmuxPane),
 	}
 
 	if notification.ID != "" {
@@ -407,12 +417,20 @@ func (s *Server) publicSession(session model.SessionSnapshot, notification model
 		item.NeedsApproval = item.OpenReason == "approval"
 		item.CanContinue = slices.Contains(notification.Actions, model.NotificationActionContinue)
 		if item.CanContinue {
-			item.ContinueAction = &publicContinueAction{
+			item.ContinueAction = &publicSessionAction{
 				Method:      http.MethodPost,
 				Endpoint:    "/v1/sessions/" + session.SessionID + "/continue",
 				ActionToken: notification.ActionToken,
 				Label:       "Continue",
 			}
+		}
+	}
+	if closer, ok := s.control.(control.SessionCloser); ok && closer != nil && item.TmuxPane != "" {
+		item.CanClose = true
+		item.CloseAction = &publicSessionAction{
+			Method:   http.MethodPost,
+			Endpoint: "/v1/sessions/" + session.SessionID + "/close",
+			Label:    "Close",
 		}
 	}
 
@@ -488,6 +506,37 @@ func (s *Server) handleSessionContinue(w http.ResponseWriter, r *http.Request, s
 	writeJSON(w, http.StatusOK, map[string]any{
 		"ok":      true,
 		"message": "continue sent",
+		"session": s.publicSession(session, model.NotificationSnapshot{}, sessionTitles([]model.SessionSnapshot{session})[session.SessionID]),
+		"status":  s.publicStatus(s.decorateSnapshot(s.store.Snapshot())),
+	})
+}
+
+func (s *Server) handleSessionClose(w http.ResponseWriter, r *http.Request, sessionID string) {
+	if sessionID == "" {
+		http.NotFound(w, r)
+		return
+	}
+
+	closer, ok := s.control.(control.SessionCloser)
+	if !ok || closer == nil {
+		http.Error(w, "close action is not configured", http.StatusNotImplemented)
+		return
+	}
+
+	session, ok := s.store.Session(sessionID)
+	if !ok || !s.isSessionVisible(session) {
+		http.NotFound(w, r)
+		return
+	}
+
+	if err := closer.Close(session); err != nil {
+		http.Error(w, fmt.Sprintf("close failed: %v", err), http.StatusBadGateway)
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"ok":      true,
+		"message": "close sent",
 		"session": s.publicSession(session, model.NotificationSnapshot{}, sessionTitles([]model.SessionSnapshot{session})[session.SessionID]),
 		"status":  s.publicStatus(s.decorateSnapshot(s.store.Snapshot())),
 	})
