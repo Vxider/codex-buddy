@@ -7,6 +7,7 @@ import (
 	"log"
 	"net/http"
 	"net/http/httptest"
+	"sync"
 	"strings"
 	"testing"
 	"time"
@@ -206,6 +207,60 @@ func TestEmptyStatusIsIdleWhenServerIsReachable(t *testing.T) {
 	}
 	if out.SessionsCount != 0 {
 		t.Fatalf("expected zero sessions, got %d", out.SessionsCount)
+	}
+}
+
+func TestInternalShutdownRequestsServerStop(t *testing.T) {
+	st := store.New(0, 0, log.New(io.Discard, "", 0))
+	server := NewServer(config.Config{Internal: config.InternalConfig{RequireLoopback: true}}, st, nil, &stubContinueExecutor{}, nil, log.New(io.Discard, "", 0))
+
+	var (
+		wg     sync.WaitGroup
+		called chan struct{}
+	)
+	called = make(chan struct{}, 1)
+	wg.Add(1)
+	server.SetShutdownFunc(func() {
+		defer wg.Done()
+		called <- struct{}{}
+	})
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/internal/shutdown", bytes.NewReader([]byte("{}")))
+	req.RemoteAddr = "127.0.0.1:12345"
+	resp := httptest.NewRecorder()
+	server.Handler().ServeHTTP(resp, req)
+
+	if resp.Code != http.StatusAccepted {
+		t.Fatalf("expected 202, got %d", resp.Code)
+	}
+
+	select {
+	case <-called:
+	case <-time.After(time.Second):
+		t.Fatal("expected shutdown callback to be called")
+	}
+	wg.Wait()
+}
+
+func TestInternalShutdownRejectsNonLoopbackRequests(t *testing.T) {
+	st := store.New(0, 0, log.New(io.Discard, "", 0))
+	server := NewServer(config.Config{Internal: config.InternalConfig{RequireLoopback: true}}, st, nil, &stubContinueExecutor{}, nil, log.New(io.Discard, "", 0))
+
+	called := false
+	server.SetShutdownFunc(func() {
+		called = true
+	})
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/internal/shutdown", bytes.NewReader([]byte("{}")))
+	req.RemoteAddr = "192.168.1.20:12345"
+	resp := httptest.NewRecorder()
+	server.Handler().ServeHTTP(resp, req)
+
+	if resp.Code != http.StatusForbidden {
+		t.Fatalf("expected 403, got %d", resp.Code)
+	}
+	if called {
+		t.Fatal("expected shutdown callback to remain untouched")
 	}
 }
 

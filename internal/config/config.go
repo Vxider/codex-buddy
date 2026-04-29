@@ -301,3 +301,7 @@ func (c Config) PublicBaseURL() string {
 func (c Config) IngestURL() string {
 	return c.InternalBaseURL() + "/v1/internal/hooks"
 }
+
+func (c Config) ShutdownURL() string {
+	return c.InternalBaseURL() + "/v1/internal/shutdown"
+}

@@ -21,6 +21,12 @@ func main() {
 		os.Exit(runSetup(os.Args[2:]))
 	case "status":
 		os.Exit(runStatus(os.Args[2:]))
+	case "start":
+		os.Exit(runStart(os.Args[2:]))
+	case "restart":
+		os.Exit(runRestart(os.Args[2:]))
+	case "stop":
+		os.Exit(runStop(os.Args[2:]))
 	case "uconsole":
 		os.Exit(runUConsole(os.Args[2:]))
 	case "cli":
@@ -56,6 +62,9 @@ func usage(w io.Writer) {
 	_, _ = fmt.Fprintln(w, "  codex-buddy hook <event-name> [--config path]")
 	_, _ = fmt.Fprintln(w, "  codex-buddy setup [--config path] [--host 0.0.0.0] [--port 8787] [--skip-systemd]")
 	_, _ = fmt.Fprintln(w, "  codex-buddy status [--config path] [--json]")
+	_, _ = fmt.Fprintln(w, "  codex-buddy start [--config path]")
+	_, _ = fmt.Fprintln(w, "  codex-buddy restart [--config path]")
+	_, _ = fmt.Fprintln(w, "  codex-buddy stop [--config path]")
 	_, _ = fmt.Fprintln(w, "  codex-buddy uconsole [--config path] [--server-url url] [--no-led]  # compatibility")
 	_, _ = fmt.Fprintln(w, "  codex-buddy-uconsole [--config path] [--server-url url] [--no-led]")
 	_, _ = fmt.Fprintln(w, "  codex-buddy cli [--config path] [--server-url url]")

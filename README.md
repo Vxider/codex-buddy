@@ -26,6 +26,12 @@ The repository currently contains three tracks:
   - Reads Codex hook events from `stdin` and forwards them to the local daemon
 - `codex-buddy status`
   - Prints the current aggregate status, optionally as JSON
+- `codex-buddy start`
+  - Starts the local daemon through `systemd --user` when installed, otherwise starts `serve` in the background
+- `codex-buddy restart`
+  - Restarts the local daemon through `systemd --user` when installed, otherwise performs a local stop/start cycle
+- `codex-buddy stop`
+  - Asks the local daemon to shut down cleanly, with `systemd --user` fallback when available
 - `codex-buddy-uconsole`
   - Starts the native uConsole companion GUI
   - Connects to a local or remote `codex-buddy` server over HTTP/SSE and supports attention/error cards, acknowledge, continue, and LED state rendering
@@ -103,6 +109,8 @@ codex-buddy setup
 Start or restart the service:
 
 ```bash
+codex-buddy start
+codex-buddy restart
 systemctl --user restart codex-buddy.service
 ```
 
@@ -111,6 +119,12 @@ Verify the installation:
 ```bash
 codex-buddy doctor
 codex-buddy status
+```
+
+Stop the local daemon cleanly:
+
+```bash
+codex-buddy stop
 ```
 
 ## Running uConsole

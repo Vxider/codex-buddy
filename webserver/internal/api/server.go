@@ -31,6 +31,7 @@ type Server struct {
 	control    control.ContinueExecutor
 	openCheck  control.SessionOpenChecker
 	logger     *log.Logger
+	shutdown   func()
 }
 
 type publicSession struct {
@@ -111,6 +112,10 @@ func NewServer(cfg config.Config, sessionStore *store.Store, transcriptManager *
 	}
 }
 
+func (s *Server) SetShutdownFunc(fn func()) {
+	s.shutdown = fn
+}
+
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 
@@ -129,6 +134,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/v1/codex/turn/start", s.handleCodexControlDisabled)
 	mux.HandleFunc("/v1/codex/stream", s.handleCodexControlDisabled)
 	mux.Handle("/v1/internal/hooks", http.HandlerFunc(s.handleInternalHooks))
+	mux.Handle("/v1/internal/shutdown", http.HandlerFunc(s.handleInternalShutdown))
 
 	return mux
 }
@@ -327,6 +333,32 @@ func (s *Server) handleInternalHooks(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusAccepted, snapshot)
+}
+
+func (s *Server) handleInternalShutdown(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	if s.cfg.Internal.RequireLoopback && !isLoopbackRequest(r.RemoteAddr) {
+		http.Error(w, "loopback required", http.StatusForbidden)
+		return
+	}
+
+	if s.shutdown == nil {
+		http.Error(w, "shutdown is not configured", http.StatusNotImplemented)
+		return
+	}
+
+	writeJSON(w, http.StatusAccepted, map[string]any{
+		"ok":      true,
+		"message": "shutdown requested",
+	})
+	if flusher, ok := w.(http.Flusher); ok {
+		flusher.Flush()
+	}
+	go s.shutdown()
 }
 
 func (s *Server) handleCodexControlDisabled(w http.ResponseWriter, r *http.Request) {

@@ -1,10 +1,15 @@
 package main
 
 import (
+	"bytes"
 	"flag"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
+	"strings"
+	"syscall"
+	"time"
 
 	"github.com/vxider/codex-buddy/internal/config"
 )
@@ -97,6 +102,124 @@ func runLogs(args []string) int {
 	return 0
 }
 
+func runStart(args []string) int {
+	fs := flag.NewFlagSet("start", flag.ExitOnError)
+	var configPath string
+	fs.StringVar(&configPath, "config", "", "Path to codex-buddy JSON config")
+	_ = fs.Parse(args)
+
+	cfg, err := config.Load(configPath)
+	if err != nil {
+		fmt.Printf("load config: %v\n", err)
+		return 1
+	}
+
+	resolvedConfigPath, err := config.ResolvePath(configPath)
+	if err != nil {
+		fmt.Printf("resolve config path: %v\n", err)
+		return 1
+	}
+
+	if status, err := fetchStatus(cfg); err == nil {
+		fmt.Printf("already running via %s (overall: %s, sessions: %d)\n", cfg.InternalBaseURL(), status.OverallState, status.SessionsCount)
+		return 0
+	}
+
+	if hasServiceFile, err := hasSystemdServiceFile(); err == nil && hasServiceFile {
+		if err := startSystemdService(); err != nil {
+			fmt.Printf("start failed: systemd start: %v\n", err)
+			return 1
+		}
+		fmt.Printf("started systemd user service: codex-buddy.service\n")
+		return 0
+	}
+
+	if err := startManagedServer(cfg, resolvedConfigPath); err != nil {
+		fmt.Printf("start failed: %v\n", err)
+		return 1
+	}
+
+	fmt.Printf("started codex-buddy in background via %s\n", cfg.InternalBaseURL())
+	return 0
+}
+
+func runRestart(args []string) int {
+	fs := flag.NewFlagSet("restart", flag.ExitOnError)
+	var configPath string
+	fs.StringVar(&configPath, "config", "", "Path to codex-buddy JSON config")
+	_ = fs.Parse(args)
+
+	cfg, err := config.Load(configPath)
+	if err != nil {
+		fmt.Printf("load config: %v\n", err)
+		return 1
+	}
+
+	resolvedConfigPath, err := config.ResolvePath(configPath)
+	if err != nil {
+		fmt.Printf("resolve config path: %v\n", err)
+		return 1
+	}
+
+	if hasServiceFile, err := hasSystemdServiceFile(); err == nil && hasServiceFile {
+		if err := restartSystemdService(); err != nil {
+			fmt.Printf("restart failed: systemd restart: %v\n", err)
+			return 1
+		}
+		fmt.Printf("restarted systemd user service: codex-buddy.service\n")
+		return 0
+	}
+
+	if _, err := fetchStatus(cfg); err == nil {
+		if err := requestShutdown(cfg); err != nil {
+			fmt.Printf("restart failed: shutdown request: %v\n", err)
+			return 1
+		}
+		if err := waitForServerDown(cfg, 5*time.Second); err != nil {
+			fmt.Printf("restart failed: %v\n", err)
+			return 1
+		}
+	}
+
+	if err := startManagedServer(cfg, resolvedConfigPath); err != nil {
+		fmt.Printf("restart failed: %v\n", err)
+		return 1
+	}
+
+	fmt.Printf("restarted codex-buddy in background via %s\n", cfg.InternalBaseURL())
+	return 0
+}
+
+func runStop(args []string) int {
+	fs := flag.NewFlagSet("stop", flag.ExitOnError)
+	var configPath string
+	fs.StringVar(&configPath, "config", "", "Path to codex-buddy JSON config")
+	_ = fs.Parse(args)
+
+	cfg, err := config.Load(configPath)
+	if err != nil {
+		fmt.Printf("load config: %v\n", err)
+		return 1
+	}
+
+	if active, err := isSystemdServiceActive(); err == nil && active {
+		if err := stopSystemdService(); err == nil {
+			fmt.Printf("stopped systemd user service: codex-buddy.service\n")
+			return 0
+		}
+		fmt.Printf("stop failed: systemd stop: %v\n", err)
+		return 1
+	}
+
+	if err := requestShutdown(cfg); err == nil {
+		fmt.Printf("stop requested via %s\n", cfg.ShutdownURL())
+		return 0
+	} else {
+		fmt.Printf("stop failed: shutdown request: %v\n", err)
+		return 1
+	}
+}
+
 func runUninstall(args []string) int {
 	fs := flag.NewFlagSet("uninstall", flag.ExitOnError)
 	var configPath string
@@ -145,4 +268,92 @@ func runUninstall(args []string) int {
 		fmt.Printf("removed binary: %s\n", paths.binPath)
 	}
 	return 0
+}
+
+func stopSystemdService() error {
+	return runSystemdServiceCommand("stop")
+}
+
+func startSystemdService() error {
+	return runSystemdServiceCommand("start")
+}
+
+func restartSystemdService() error {
+	return runSystemdServiceCommand("restart")
+}
+
+func runSystemdServiceCommand(action string) error {
+	cmd := exec.Command("systemctl", "--user", action, "codex-buddy.service")
+	output, err := cmd.CombinedOutput()
+	if err == nil {
+		return nil
+	}
+
+	message := strings.TrimSpace(string(bytes.TrimSpace(output)))
+	if message == "" {
+		return err
+	}
+	return fmt.Errorf("%w: %s", err, message)
+}
+
+func isSystemdServiceActive() (bool, error) {
+	cmd := exec.Command("systemctl", "--user", "is-active", "--quiet", "codex-buddy.service")
+	if err := cmd.Run(); err != nil {
+		if exitErr, ok := err.(*exec.ExitError); ok && exitErr.ExitCode() == 3 {
+			return false, nil
+		}
+		return false, err
+	}
+	return true, nil
+}
+
+func hasSystemdServiceFile() (bool, error) {
+	paths, err := resolveUserPaths()
+	if err != nil {
+		return false, err
+	}
+	if err := checkFileExists(paths.servicePath); err != nil {
+		if os.IsNotExist(err) {
+			return false, nil
+		}
+		return false, err
+	}
+	return true, nil
+}
+
+func startManagedServer(cfg config.Config, resolvedConfigPath string) error {
+	if len(cfg.HookClient.AutostartCommand) > 0 {
+		return startDetachedCommand(cfg.HookClient.AutostartCommand[0], cfg.HookClient.AutostartCommand[1:]...)
+	}
+	return startDetachedServe(resolvedConfigPath)
+}
+
+func startDetachedServe(resolvedConfigPath string) error {
+	selfPath, err := os.Executable()
+	if err != nil {
+		return err
+	}
+	return startDetachedCommand(selfPath, "serve", "--config", resolvedConfigPath)
+}
+
+func startDetachedCommand(name string, args ...string) error {
+	cmd := exec.Command(name, args...)
+	cmd.Stdout = io.Discard
+	cmd.Stderr = io.Discard
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
+	if err := cmd.Start(); err != nil {
+		return err
+	}
+	return cmd.Process.Release()
+}
+
+func waitForServerDown(cfg config.Config, timeout time.Duration) error {
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		if _, err := fetchStatus(cfg); err != nil {
+			return nil
+		}
+		time.Sleep(200 * time.Millisecond)
+	}
+	return fmt.Errorf("server did not stop within %s", timeout)
 }

@@ -20,6 +20,8 @@ func Run(ctx context.Context, cfg config.Config, logger *log.Logger) error {
 	if ctx == nil {
 		ctx = context.Background()
 	}
+	ctx, cancelCtx := context.WithCancel(ctx)
+	defer cancelCtx()
 
 	runtime := engine.NewRuntime(cfg, logger)
 	runtime.Start(ctx)
@@ -31,6 +33,12 @@ func Run(ctx context.Context, cfg config.Config, logger *log.Logger) error {
 		runtime.SessionOpenChecker(),
 		logger,
 	)
+	server.SetShutdownFunc(func() {
+		if logger != nil {
+			logger.Printf("shutdown requested via internal API")
+		}
+		cancelCtx()
+	})
 
 	httpServer := &http.Server{
 		Addr:              cfg.Listen.Address(),

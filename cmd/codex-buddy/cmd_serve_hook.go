@@ -39,6 +39,14 @@ func runServe(args []string) int {
 	defer stop()
 
 	if err := webserver.Run(ctx, cfg, logger); err != nil {
+		if errors.Is(err, syscall.EADDRINUSE) {
+			if status, statusErr := fetchStatus(cfg); statusErr == nil {
+				logger.Printf("listen %s failed: codex-buddy is already running via %s (overall: %s, sessions: %d). Use `codex-buddy restart` or `codex-buddy stop` if you need to replace it", cfg.Listen.Address(), cfg.InternalBaseURL(), status.OverallState, status.SessionsCount)
+				return 1
+			}
+			logger.Printf("listen %s failed: address already in use by another process or an unreachable codex-buddy. Try `codex-buddy stop` or `systemctl --user stop codex-buddy.service` if this should be the buddy daemon", cfg.Listen.Address())
+			return 1
+		}
 		logger.Printf("webserver failed: %v", err)
 		return 1
 	}

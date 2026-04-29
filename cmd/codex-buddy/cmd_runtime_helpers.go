@@ -1,9 +1,12 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/vxider/codex-buddy/internal/config"
@@ -29,6 +32,30 @@ func fetchStatus(cfg config.Config) (apiStatus, error) {
 		return apiStatus{}, err
 	}
 	return status, nil
+}
+
+func requestShutdown(cfg config.Config) error {
+	client := &http.Client{Timeout: 2 * time.Second}
+	req, err := http.NewRequest(http.MethodPost, cfg.ShutdownURL(), bytes.NewReader([]byte("{}")))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusAccepted && resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))
+		bodyText := strings.TrimSpace(string(body))
+		if bodyText == "" {
+			return fmt.Errorf("unexpected status %d", resp.StatusCode)
+		}
+		return fmt.Errorf("unexpected status %d: %s", resp.StatusCode, bodyText)
+	}
+	return nil
 }
 
 func firstNonEmpty(values ...string) string {
