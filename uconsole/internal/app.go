@@ -3124,7 +3124,7 @@ func badgeStyle(state model.State) (string, color.NRGBA) {
 	case model.StateIdle:
 		return "idle", color.NRGBA{R: 0x58, G: 0x72, B: 0x58, A: 0xFF}
 	case model.StateRunning, model.StateRunningBash:
-		return "running", color.NRGBA{R: 0x19, G: 0x5F, B: 0x92, A: 0xFF}
+		return "RUN", color.NRGBA{R: 0x19, G: 0x5F, B: 0x92, A: 0xFF}
 	case model.StateAttention:
 		return "open", color.NRGBA{R: 0xBC, G: 0x7A, B: 0x00, A: 0xFF}
 	case model.StateError:
@@ -3175,7 +3175,7 @@ func sessionBadgeStyle(state model.State) (string, color.NRGBA) {
 	case model.StateIdle:
 		return "idle", color.NRGBA{R: 0x58, G: 0x72, B: 0x58, A: 0xFF}
 	case model.StateRunning, model.StateRunningBash:
-		return "running", color.NRGBA{R: 0x19, G: 0x5F, B: 0x92, A: 0xFF}
+		return "RUN", color.NRGBA{R: 0x19, G: 0x5F, B: 0x92, A: 0xFF}
 	case model.StateAttention:
 		return "open", color.NRGBA{R: 0xBC, G: 0x7A, B: 0x00, A: 0xFF}
 	case model.StateError:

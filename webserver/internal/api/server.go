@@ -1167,9 +1167,9 @@ var debugPageHTML = `<!doctype html>
     .session-summary li { margin: 4px 0; }
     .session-summary a { color: inherit; text-decoration: none; pointer-events: none; cursor: text; }
     .session-summary code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; padding: 1px 5px; border-radius: 6px; background: #162033; color: #e2e8f0; }
-    .session-summary pre { margin: 8px 0 10px; padding: 12px 14px; overflow: auto; border-radius: 10px; border: 1px solid #2f3d5d; background: #0b1220; color: #dbe6ff; white-space: pre-wrap; }
+    .session-summary pre { margin: 8px 0 10px; padding: 12px 14px; overflow: auto; color: #dbe6ff; white-space: pre-wrap; }
     .session-summary pre code { padding: 0; border-radius: 0; background: transparent; color: inherit; }
-    .session-summary .terminal-output { background: #0b1220; border-color: #2f3d5d; }
+    .session-summary .terminal-output { background: transparent; }
   </style>
 </head>
 <body>
@@ -1218,7 +1218,7 @@ var debugPageHTML = `<!doctype html>
     function renderStateChip(el, state) {
       const normalized = normalizeState(state);
       el.className = 'status status-' + normalized;
-      el.textContent = normalized;
+      el.textContent = normalized === 'running' ? 'RUN' : normalized;
     }
     async function loadOnce() {
       const resp = await fetch('/v1/status');
