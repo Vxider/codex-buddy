@@ -15,10 +15,8 @@ func Run(args []string) int {
 	fs := flag.NewFlagSet("uconsole", flag.ExitOnError)
 	var configPath string
 	var serverURL string
-	var noLED bool
 	fs.StringVar(&configPath, "config", "", "Path to codex-buddy JSON config")
 	fs.StringVar(&serverURL, "server-url", "", "Override uConsole buddy server URL")
-	fs.BoolVar(&noLED, "no-led", false, "Disable WS2812 output for local debugging")
 	_ = fs.Parse(args)
 
 	cfg, err := config.Load(configPath)
@@ -33,9 +31,6 @@ func Run(args []string) int {
 	}
 	if serverURL != "" {
 		cfg.UConsole.ServerURL = serverURL
-	}
-	if noLED {
-		cfg.UConsole.LED.Enabled = false
 	}
 
 	logger := log.New(os.Stdout, "codex-buddy-uconsole: ", log.LstdFlags|log.Lmsgprefix)

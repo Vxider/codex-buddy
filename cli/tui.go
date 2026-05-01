@@ -535,7 +535,7 @@ func sessionStateBadge(state model.State) string {
 		color = lipgloss.Color("9")
 	case model.StateAttention:
 		return attentionBadgeStyle().Render(label)
-	case model.StateRunning, model.StateRunningBash:
+	case model.StateRun, model.StateRunning, model.StateRunningBash:
 		color = lipgloss.Color("10")
 	case model.StateIdle:
 		color = lipgloss.Color("12")
@@ -592,7 +592,7 @@ func colorForState(state model.State, connected bool) lipgloss.Style {
 		return errorLineStyle
 	case model.StateAttention:
 		return attentionLineStyle
-	case model.StateRunning, model.StateRunningBash:
+	case model.StateRun, model.StateRunning, model.StateRunningBash:
 		return runningLineStyle
 	case model.StateIdle:
 		return idleLineStyle
@@ -682,7 +682,7 @@ func stateBadge(label string, state model.State) string {
 		color = "9"
 	case model.StateAttention:
 		return attentionStateBadgeStyle().Render(label)
-	case model.StateRunning, model.StateRunningBash:
+	case model.StateRun, model.StateRunning, model.StateRunningBash:
 		color = "10"
 	case model.StateIdle:
 		color = "12"

@@ -25,6 +25,7 @@ type statusClient interface {
 	AckNotification(ctx context.Context, id string) error
 	ContinueNotification(ctx context.Context, item NotificationResponse) error
 	ContinueSession(ctx context.Context, session SessionResponse) error
+	SendSessionText(ctx context.Context, session SessionResponse, text string) error
 	CloseSession(ctx context.Context, session SessionResponse) error
 }
 
@@ -119,14 +120,25 @@ func (c *LocalClient) ContinueNotification(ctx context.Context, item Notificatio
 }
 
 func (c *LocalClient) ContinueSession(ctx context.Context, session SessionResponse) error {
-	return c.executeSessionAction(ctx, session.ContinueAction, "session continue")
+	return c.executeSessionAction(ctx, session.ContinueAction, "session continue", "")
+}
+
+func (c *LocalClient) SendSessionText(ctx context.Context, session SessionResponse, text string) error {
+	action := session.ContinueAction
+	if action == nil && strings.TrimSpace(session.SessionID) != "" {
+		action = &SessionActionPayload{
+			Method:   http.MethodPost,
+			Endpoint: "/v1/sessions/" + session.SessionID + "/continue",
+		}
+	}
+	return c.executeSessionAction(ctx, action, "session text", text)
 }
 
 func (c *LocalClient) CloseSession(ctx context.Context, session SessionResponse) error {
-	return c.executeSessionAction(ctx, session.CloseAction, "session close")
+	return c.executeSessionAction(ctx, session.CloseAction, "session close", "")
 }
 
-func (c *LocalClient) executeSessionAction(ctx context.Context, action *SessionActionPayload, actionName string) error {
+func (c *LocalClient) executeSessionAction(ctx context.Context, action *SessionActionPayload, actionName string, text string) error {
 	if action == nil {
 		return fmt.Errorf("%s is unavailable", actionName)
 	}
@@ -150,6 +162,7 @@ func (c *LocalClient) executeSessionAction(ctx context.Context, action *SessionA
 
 	payload, err := json.Marshal(map[string]string{
 		"action_token": strings.TrimSpace(action.ActionToken),
+		"text":         strings.TrimSpace(text),
 	})
 	if err != nil {
 		return err

@@ -116,7 +116,7 @@ struct WatchContentView: View {
             return .gray
         case .idle:
             return .green
-        case .running:
+        case .run, .running:
             return .blue
         case .open:
             return .orange

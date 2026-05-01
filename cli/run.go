@@ -471,7 +471,7 @@ func stateRank(state model.State) int {
 		return 4
 	case model.StateRunningBash:
 		return 3
-	case model.StateRunning:
+	case model.StateRun, model.StateRunning:
 		return 2
 	case model.StateIdle:
 		return 1

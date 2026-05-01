@@ -7,35 +7,29 @@ Usage:
   ./uconsole/scripts/build-install.sh [options]
 
 Options:
-  --ws281x            Build with the WS2812 hardware driver (`ws281x`)
   --output PATH       Install destination (default: ~/.local/bin/codex-buddy-uconsole)
   --dry-run           Print the resolved build/install plan without writing files
   -h, --help          Show this help
 
 Examples:
   ./uconsole/scripts/build-install.sh
-  ./uconsole/scripts/build-install.sh --ws281x
 EOF
 }
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd -- "${SCRIPT_DIR}/../.." && pwd)"
+DESKTOP_INSTALL_SCRIPT="${SCRIPT_DIR}/install-user-desktop.sh"
 
 GO_HOME_BASE="${HOME}"
 if [[ ! -d "${GO_HOME_BASE}" || ! -w "${GO_HOME_BASE}" ]]; then
   GO_HOME_BASE="${TMPDIR:-/tmp}/codex-buddy-go"
 fi
 
-ENABLE_WS281X=0
 DRY_RUN=0
 INSTALL_PATH="${HOME}/.local/bin/codex-buddy-uconsole"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --ws281x)
-      ENABLE_WS281X=1
-      shift
-      ;;
     --output)
       if [[ $# -lt 2 ]]; then
         echo "error: --output requires a path" >&2
@@ -86,9 +80,6 @@ export REAL_CC="${REAL_CC_VALUE}"
 export CC="${SCRIPT_DIR}/gcc-no-base64.sh"
 
 TAGS=("uconsole_gui")
-if [[ "${ENABLE_WS281X}" -eq 1 ]]; then
-  TAGS+=("ws281x")
-fi
 
 echo "==> codex-buddy uconsole build + install"
 echo "repo: ${REPO_ROOT}"
@@ -115,6 +106,11 @@ echo "==> building"
 echo "==> installing"
 install -m 0755 "${TMP_BIN}" "${TMP_INSTALL}"
 mv "${TMP_INSTALL}" "${INSTALL_PATH}"
+
+if [[ -x "${DESKTOP_INSTALL_SCRIPT}" ]]; then
+  echo "==> refreshing desktop launcher"
+  "${DESKTOP_INSTALL_SCRIPT}"
+fi
 
 echo "==> done"
 echo "binary: ${INSTALL_PATH}"

@@ -3,6 +3,7 @@ import Foundation
 enum CodexState: String, Codable, CaseIterable, Hashable {
     case offline
     case idle
+    case run
     case running
     case runningBash = "running_bash"
     case open
@@ -16,6 +17,8 @@ enum CodexState: String, Codable, CaseIterable, Hashable {
             self = .offline
         case "idle":
             self = .idle
+        case "run":
+            self = .run
         case "running":
             self = .running
         case "running_bash":
@@ -31,10 +34,10 @@ enum CodexState: String, Codable, CaseIterable, Hashable {
 
     var normalized: CodexState {
         switch self {
-        case .runningBash:
-            return .running
+        case .run, .running, .runningBash:
+            return .run
         default:
-            return self
+            return .open
         }
     }
 
@@ -44,10 +47,10 @@ enum CodexState: String, Codable, CaseIterable, Hashable {
             return "Offline"
         case .idle:
             return "Idle"
-        case .running:
-            return "Running"
+        case .run, .running:
+            return "RUN"
         case .open:
-            return "Open"
+            return "OPEN"
         case .error:
             return "Error"
         case .runningBash:
@@ -61,7 +64,7 @@ enum CodexState: String, Codable, CaseIterable, Hashable {
             return "❔"
         case .idle:
             return "😊"
-        case .running:
+        case .run, .running:
             return "🫡"
         case .open:
             return "🟠"
@@ -78,7 +81,7 @@ enum CodexState: String, Codable, CaseIterable, Hashable {
             return "secondary"
         case .idle:
             return "green"
-        case .running:
+        case .run, .running:
             return "blue"
         case .open:
             return "orange"
@@ -216,11 +219,11 @@ struct CodexSessionSummary: Codable, Identifiable, Hashable {
     var watchTitle: String { watchListTitle }
 
     var phoneSummary: String {
-        if let compactOpenSummary, !compactOpenSummary.isEmpty {
-            return compactOpenSummary
-        }
         if let openSummary, !openSummary.isEmpty {
             return openSummary
+        }
+        if let compactOpenSummary, !compactOpenSummary.isEmpty {
+            return compactOpenSummary
         }
         if let compactSummary, !compactSummary.isEmpty {
             return compactSummary
@@ -229,14 +232,14 @@ struct CodexSessionSummary: Codable, Identifiable, Hashable {
     }
 
     var watchSummary: String {
+        if let openSummary, !openSummary.isEmpty {
+            return openSummary
+        }
         if let microOpenSummary, !microOpenSummary.isEmpty {
             return microOpenSummary
         }
         if let compactOpenSummary, !compactOpenSummary.isEmpty {
             return compactOpenSummary
-        }
-        if let openSummary, !openSummary.isEmpty {
-            return openSummary
         }
         if let microSummary, !microSummary.isEmpty {
             return microSummary

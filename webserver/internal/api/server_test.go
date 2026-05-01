@@ -61,8 +61,8 @@ func TestStatusIncludesOpenSummaryAndContinueAction(t *testing.T) {
 	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
 		t.Fatalf("decode status: %v", err)
 	}
-	if out.OverallState != model.StateAttention {
-		t.Fatalf("expected attention overall state, got %s", out.OverallState)
+	if out.OverallState != model.StateOpen {
+		t.Fatalf("expected open overall state, got %s", out.OverallState)
 	}
 	if len(out.Sessions) != 1 {
 		t.Fatalf("expected one session, got %d", len(out.Sessions))
@@ -183,6 +183,57 @@ func TestOpenSummaryPreservesFullAssistantReply(t *testing.T) {
 	}
 }
 
+func TestStoppedOpenSessionShowsFullAssistantReply(t *testing.T) {
+	st := store.New(30*time.Second, 0, log.New(io.Discard, "", 0))
+	now := time.Date(2026, 4, 26, 9, 0, 0, 0, time.UTC)
+	fullReply := "Done. I finished the implementation, updated the tests, and left the deployment notes in place.\n\nThe remaining work is operational: restart the service, open the uConsole launcher again, and confirm the taskbar icon is no longer inherited from another app."
+
+	st.ApplyIngest(model.IngestRequest{
+		EventName:  "user-prompt-submit",
+		ReceivedAt: now,
+		Payload: model.HookPayload{
+			SessionID: "sess-stopped-full",
+			CWD:       "/repo/uconsole",
+			Prompt:    "finish taskbar work",
+			TmuxPane:  "%72",
+		},
+	})
+	st.ApplyIngest(model.IngestRequest{
+		EventName:  "stop",
+		ReceivedAt: now.Add(time.Second),
+		Payload: model.HookPayload{
+			SessionID:            "sess-stopped-full",
+			CWD:                  "/repo/uconsole",
+			TmuxPane:             "%72",
+			LastAssistantMessage: fullReply,
+		},
+	})
+
+	server := NewServer(config.Config{}, st, nil, &stubContinueExecutor{}, nil, log.New(io.Discard, "", 0))
+	req := httptest.NewRequest(http.MethodGet, "/v1/status", nil)
+	resp := httptest.NewRecorder()
+	server.Handler().ServeHTTP(resp, req)
+
+	if resp.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", resp.Code)
+	}
+
+	var out publicStatus
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		t.Fatalf("decode status: %v", err)
+	}
+	if len(out.Sessions) != 1 {
+		t.Fatalf("expected one session, got %d", len(out.Sessions))
+	}
+	session := out.Sessions[0]
+	if session.State != model.StateOpen {
+		t.Fatalf("expected public open state, got %s", session.State)
+	}
+	if session.OpenSummary != fullReply {
+		t.Fatalf("expected full open summary, got %q", session.OpenSummary)
+	}
+}
+
 func TestEmptyStatusIsIdleWhenServerIsReachable(t *testing.T) {
 	st := store.New(0, 0, log.New(io.Discard, "", 0))
 	server := NewServer(config.Config{}, st, nil, &stubContinueExecutor{}, nil, log.New(io.Discard, "", 0))
@@ -199,8 +250,8 @@ func TestEmptyStatusIsIdleWhenServerIsReachable(t *testing.T) {
 	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
 		t.Fatalf("decode status: %v", err)
 	}
-	if out.OverallState != model.StateIdle {
-		t.Fatalf("expected idle overall state for reachable empty server, got %s", out.OverallState)
+	if out.OverallState != model.StateOpen {
+		t.Fatalf("expected open overall state for reachable empty server, got %s", out.OverallState)
 	}
 	if out.OverallStateDetail != string(model.StateIdle) {
 		t.Fatalf("expected idle state detail, got %q", out.OverallStateDetail)
@@ -622,8 +673,8 @@ func TestStatusRunningSummaryDoesNotExposeTranscriptError(t *testing.T) {
 	if len(out.Sessions) != 1 {
 		t.Fatalf("expected one session, got %d", len(out.Sessions))
 	}
-	if out.Sessions[0].State != model.StateRunning {
-		t.Fatalf("expected running state, got %s", out.Sessions[0].State)
+	if out.Sessions[0].State != model.StateRun {
+		t.Fatalf("expected run state, got %s", out.Sessions[0].State)
 	}
 	if out.Sessions[0].Summary != "still working through the refactor" {
 		t.Fatalf("unexpected running summary: %q", out.Sessions[0].Summary)
@@ -675,8 +726,8 @@ func TestStatusErrorSummaryPrefersReadableCommandFailure(t *testing.T) {
 	if len(out.Sessions) != 1 {
 		t.Fatalf("expected one session, got %d", len(out.Sessions))
 	}
-	if out.Sessions[0].State != model.StateError {
-		t.Fatalf("expected error state, got %s", out.Sessions[0].State)
+	if out.Sessions[0].State != model.StateOpen {
+		t.Fatalf("expected open state, got %s", out.Sessions[0].State)
 	}
 	if out.Sessions[0].Summary != "Command failed: go test ./webserver/..." {
 		t.Fatalf("unexpected error summary: %q", out.Sessions[0].Summary)
@@ -729,8 +780,64 @@ func TestSessionContinueEndpoint(t *testing.T) {
 	if len(out.Status.Sessions) != 1 {
 		t.Fatalf("expected one session in status response")
 	}
-	if out.Status.Sessions[0].CanContinue {
-		t.Fatalf("expected continue action to disappear after acting")
+	if !out.Status.Sessions[0].CanContinue {
+		t.Fatalf("expected open session to remain continuable")
+	}
+	if out.Status.Sessions[0].ContinueAction == nil {
+		t.Fatalf("expected fallback continue action")
+	}
+	if out.Status.Sessions[0].ContinueAction.ActionToken != "" {
+		t.Fatalf("expected fallback continue action without token")
+	}
+}
+
+func TestSessionContinueEndpointAcceptsTextWithoutActionToken(t *testing.T) {
+	st := newAttentionStore(t)
+	exec := &stubContinueExecutor{}
+	server := NewServer(config.Config{}, st, nil, exec, nil, log.New(io.Discard, "", 0))
+
+	body, err := json.Marshal(map[string]string{"text": "use the voice transcript"})
+	if err != nil {
+		t.Fatalf("marshal body: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/sessions/sess-1/continue", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	resp := httptest.NewRecorder()
+	server.Handler().ServeHTTP(resp, req)
+
+	if resp.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", resp.Code, resp.Body.String())
+	}
+	if !exec.called {
+		t.Fatalf("expected continue executor to be called")
+	}
+	if exec.session.SessionID != "sess-1" {
+		t.Fatalf("unexpected session id: %q", exec.session.SessionID)
+	}
+	if exec.text != "use the voice transcript" {
+		t.Fatalf("unexpected text: %q", exec.text)
+	}
+}
+
+func TestSessionContinueEndpointAcceptsDefaultContinueWithoutActionToken(t *testing.T) {
+	st := newAttentionStore(t)
+	exec := &stubContinueExecutor{}
+	server := NewServer(config.Config{}, st, nil, exec, nil, log.New(io.Discard, "", 0))
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/sessions/sess-1/continue", strings.NewReader(`{}`))
+	req.Header.Set("Content-Type", "application/json")
+	resp := httptest.NewRecorder()
+	server.Handler().ServeHTTP(resp, req)
+
+	if resp.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", resp.Code, resp.Body.String())
+	}
+	if !exec.called {
+		t.Fatalf("expected continue executor to be called")
+	}
+	if exec.text != model.ContinueCommandText {
+		t.Fatalf("unexpected text: %q", exec.text)
 	}
 }
 

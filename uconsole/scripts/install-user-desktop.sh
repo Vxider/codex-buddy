@@ -12,7 +12,9 @@ BIN_TARGET="${HOME}/.local/bin/codex-buddy-uconsole"
 APP_DIR="${HOME}/.local/share/applications"
 ICON_DIR="${HOME}/.local/share/icons/hicolor/1024x1024/apps"
 ICON_TARGET="${ICON_DIR}/codex-buddy-uconsole.png"
-DESKTOP_FILE="${APP_DIR}/codex-buddy-uconsole.desktop"
+DESKTOP_ID="github.com.vxider.codex-buddy.uconsole"
+DESKTOP_FILE="${APP_DIR}/${DESKTOP_ID}.desktop"
+LEGACY_DESKTOP_FILE="${APP_DIR}/codex-buddy-uconsole.desktop"
 DESKTOP_COPY="${HOME}/Desktop/codex-buddy-uconsole.desktop"
 
 if [[ ! -f "${ICON_SOURCE}" ]]; then
@@ -45,18 +47,18 @@ escape_sed_replacement() {
 
 BIN_TARGET_ESCAPED="$(escape_sed_replacement "${BIN_TARGET}")"
 SERVER_URL_ESCAPED="$(escape_sed_replacement "${SERVER_URL}")"
-ICON_TARGET_ESCAPED="$(escape_sed_replacement "${ICON_TARGET}")"
 
 sed \
-  -e "s|__BIN_TARGET__|${BIN_TARGET_ESCAPED}|g" \
-  -e "s|__SERVER_URL__|${SERVER_URL_ESCAPED}|g" \
-  -e "s|__ICON_TARGET__|${ICON_TARGET_ESCAPED}|g" \
-  "${DESKTOP_TEMPLATE}" > "${DESKTOP_FILE}"
+	-e "s|__BIN_TARGET__|${BIN_TARGET_ESCAPED}|g" \
+	-e "s|__SERVER_URL__|${SERVER_URL_ESCAPED}|g" \
+	"${DESKTOP_TEMPLATE}" > "${DESKTOP_FILE}"
 
 chmod +x "${DESKTOP_FILE}"
+cp "${DESKTOP_FILE}" "${LEGACY_DESKTOP_FILE}"
+chmod +x "${LEGACY_DESKTOP_FILE}"
 
 if [[ -d "${HOME}/Desktop" ]]; then
-  cp "${DESKTOP_FILE}" "${DESKTOP_COPY}"
+	cp "${DESKTOP_FILE}" "${DESKTOP_COPY}"
   chmod +x "${DESKTOP_COPY}"
 fi
 
@@ -64,6 +66,7 @@ echo "Installed binary: ${BIN_TARGET}"
 echo "Binary source: ${BIN_INSTALL_SOURCE}"
 echo "Installed icon: ${ICON_TARGET}"
 echo "Installed launcher: ${DESKTOP_FILE}"
+echo "Legacy launcher: ${LEGACY_DESKTOP_FILE}"
 if [[ -f "${DESKTOP_COPY}" ]]; then
-  echo "Desktop shortcut: ${DESKTOP_COPY}"
+	echo "Desktop shortcut: ${DESKTOP_COPY}"
 fi

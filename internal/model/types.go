@@ -7,6 +7,7 @@ type State string
 const (
 	StateOffline     State = "offline"
 	StateIdle        State = "idle"
+	StateRun         State = "run"
 	StateRunning     State = "running"
 	StateRunningBash State = "running_bash"
 	StateOpen        State = "open"

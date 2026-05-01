@@ -17,6 +17,8 @@ Desktop.ini
 .fleet/
 
 # Go build outputs
+/codex-buddy
+/codex-buddy-uconsole
 bin/
 dist/
 coverage.out

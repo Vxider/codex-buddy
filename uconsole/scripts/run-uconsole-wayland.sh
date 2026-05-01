@@ -16,4 +16,4 @@ exec env \
   HOME="${HOME_BASE}" \
   XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/run/user/1000}" \
   WAYLAND_DISPLAY="${WAYLAND_DISPLAY:-wayland-0}" \
-  "${BIN_PATH}" uconsole --server-url "${SERVER_URL}" --no-led
+  "${BIN_PATH}" uconsole --server-url "${SERVER_URL}"

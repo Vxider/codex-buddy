@@ -7,14 +7,20 @@ import (
 )
 
 func normalizeCompatState(state model.State) model.State {
-	return model.State(strings.ToLower(strings.TrimSpace(string(state))))
+	state = model.State(strings.ToLower(strings.TrimSpace(string(state))))
+	switch state {
+	case model.StateRun, model.StateRunning, model.StateRunningBash:
+		return model.StateRun
+	default:
+		return model.StateOpen
+	}
 }
 
 func normalizeSessionState(state model.State) model.State {
 	state = normalizeCompatState(state)
 	switch state {
 	case "", model.StateOffline:
-		return model.StateIdle
+		return model.StateOpen
 	default:
 		return state
 	}

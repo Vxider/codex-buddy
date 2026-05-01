@@ -32,7 +32,6 @@ import (
 	"github.com/vxider/codex-buddy/engine"
 	"github.com/vxider/codex-buddy/internal/config"
 	"github.com/vxider/codex-buddy/internal/model"
-	"github.com/vxider/codex-buddy/uconsole/internal/light"
 )
 
 type App struct {
@@ -42,7 +41,6 @@ type App struct {
 	logger       *log.Logger
 	fyneApp      fyne.App
 	window       fyne.Window
-	lightRunner  *light.Runner
 	localRuntime *engine.Runtime
 	localServer  *engine.EmbeddedServer
 
@@ -63,6 +61,8 @@ type App struct {
 	settingsEditor           *dialog.FormDialog
 	settingsDelete           *dialog.ConfirmDialog
 	continueConfirm          *dialog.ConfirmDialog
+	voiceDialog              *dialog.FormDialog
+	voiceRecordDialog        *dialog.ConfirmDialog
 	helpDialog               dialog.Dialog
 	statusUntil              time.Time
 	darkMode                 bool
@@ -92,11 +92,6 @@ type App struct {
 	rootScroll             *container.Scroll
 	settingsSummary        *widget.Label
 	settingsList           *fyne.Container
-	tailscaleState         tailscaleState
-	exitNodeButton         *splitBadgeButton
-	exitNodeMenu           *fyne.Container
-	exitNodeMenuOpen       bool
-	tailscaleBusy          bool
 	openShortcutByAction   map[string]fyne.KeyName
 	openActionByShortcut   map[fyne.KeyName]string
 	openActionPending      map[string]bool
@@ -108,6 +103,10 @@ type App struct {
 	scrollHoldMu           sync.Mutex
 	scrollHoldStop         chan struct{}
 	scrollHoldKey          fyne.KeyName
+	voiceCapture           *voiceCapture
+	voiceDialogSession     SessionResponse
+	voiceDialogActionKey   string
+	voiceDialogEntry       *widget.Entry
 }
 
 type serverSnapshot struct {
@@ -137,6 +136,7 @@ type badgeButton struct {
 	widget.BaseWidget
 
 	Text      string
+	Icon      fyne.Resource
 	Fill      color.Color
 	TextColor color.Color
 	TextSize  float32
@@ -148,34 +148,9 @@ type badgeButton struct {
 type badgeButtonRenderer struct {
 	button  *badgeButton
 	bg      *canvas.Rectangle
+	icon    *widget.Icon
 	label   *canvas.Text
 	objects []fyne.CanvasObject
-}
-
-type splitBadgeButton struct {
-	widget.BaseWidget
-
-	LeftText  string
-	RightText string
-	LeftFill  color.Color
-	RightFill color.Color
-	TextColor color.Color
-	TextSize  float32
-	MinWidth  float32
-	Disabled  bool
-	OnTapped  func()
-}
-
-type splitBadgeButtonRenderer struct {
-	button     *splitBadgeButton
-	leftCap    *canvas.Rectangle
-	leftBody   *canvas.Rectangle
-	rightBody  *canvas.Rectangle
-	rightCap   *canvas.Rectangle
-	leftLabel  *canvas.Text
-	rightLabel *canvas.Text
-	separator  *canvas.Line
-	objects    []fyne.CanvasObject
 }
 
 type sessionListState struct {
@@ -190,6 +165,7 @@ type openSessionActionKind string
 
 const (
 	openSessionActionContinue openSessionActionKind = "continue"
+	openSessionActionVoice    openSessionActionKind = "voice"
 	openSessionActionClose    openSessionActionKind = "close"
 	openSessionActionJump     openSessionActionKind = "jump"
 )
@@ -217,8 +193,10 @@ type stickySessionRowLayout struct {
 }
 
 type markdownSpan struct {
-	Text  string
-	Style widget.RichTextStyle
+	Text     string
+	Style    widget.RichTextStyle
+	Color    color.NRGBA
+	HasColor bool
 }
 
 type markdownParagraph struct {
@@ -227,10 +205,12 @@ type markdownParagraph struct {
 }
 
 type markdownParagraphFragment struct {
-	Text  string
-	Style widget.RichTextStyle
-	X     float32
-	Y     float32
+	Text     string
+	Style    widget.RichTextStyle
+	Color    color.NRGBA
+	HasColor bool
+	X        float32
+	Y        float32
 }
 
 var openShortcutPool = []fyne.KeyName{
@@ -458,7 +438,7 @@ func compactMarkdownSpans(spans []markdownSpan) []markdownSpan {
 			continue
 		}
 		lastIndex := len(merged) - 1
-		if lastIndex >= 0 && merged[lastIndex].Style == span.Style {
+		if lastIndex >= 0 && merged[lastIndex].Style == span.Style && merged[lastIndex].HasColor == span.HasColor && merged[lastIndex].Color == span.Color {
 			merged[lastIndex].Text += span.Text
 			continue
 		}
@@ -494,7 +474,7 @@ func (r *markdownParagraphRenderer) Layout(size fyne.Size) {
 		text := object.(*canvas.Text)
 		fragment := r.fragments[i]
 		text.Text = fragment.Text
-		text.Color = markdownTextColor(fragment.Style)
+		text.Color = markdownFragmentColor(fragment)
 		text.TextStyle = fragment.Style.TextStyle
 		text.TextSize = markdownTextSize(fragment.Style)
 		text.Move(fyne.NewPos(fragment.X, fragment.Y))
@@ -538,7 +518,7 @@ func (r *markdownParagraphRenderer) ensureLayout(width float32) {
 
 	r.objects = make([]fyne.CanvasObject, 0, len(fragments))
 	for _, fragment := range fragments {
-		text := canvas.NewText(fragment.Text, markdownTextColor(fragment.Style))
+		text := canvas.NewText(fragment.Text, markdownFragmentColor(fragment))
 		text.TextStyle = fragment.Style.TextStyle
 		text.TextSize = markdownTextSize(fragment.Style)
 		r.objects = append(r.objects, text)
@@ -598,26 +578,31 @@ func layoutMarkdownParagraph(spans []markdownSpan, width float32) ([]markdownPar
 		rowHeight = 0
 	}
 
-	appendFragment := func(text string, style widget.RichTextStyle) {
+	appendFragment := func(text string, token markdownSpan) {
 		if text == "" {
 			return
 		}
+		style := token.Style
+		tokenColor := token.Color
+		hasColor := token.HasColor
 		size := fyne.MeasureText(text, markdownTextSize(style), style.TextStyle)
 		rowHeight = maxFloat32(rowHeight, size.Height)
 		lastIndex := len(fragments) - 1
 		if lastIndex >= 0 {
 			last := &fragments[lastIndex]
-			if last.Style == style && last.Y == y && last.X+fyne.MeasureText(last.Text, markdownTextSize(style), style.TextStyle).Width == x {
+			if last.Style == style && last.HasColor == hasColor && last.Color == tokenColor && last.Y == y && last.X+fyne.MeasureText(last.Text, markdownTextSize(style), style.TextStyle).Width == x {
 				last.Text += text
 				x += size.Width
 				return
 			}
 		}
 		fragments = append(fragments, markdownParagraphFragment{
-			Text:  text,
-			Style: style,
-			X:     x,
-			Y:     y,
+			Text:     text,
+			Style:    style,
+			Color:    tokenColor,
+			HasColor: hasColor,
+			X:        x,
+			Y:        y,
 		})
 		x += size.Width
 	}
@@ -637,7 +622,7 @@ func layoutMarkdownParagraph(spans []markdownSpan, width float32) ([]markdownPar
 
 			size := fyne.MeasureText(text, markdownTextSize(style), style.TextStyle)
 			if size.Width <= width-x {
-				appendFragment(text, style)
+				appendFragment(text, token)
 				break
 			}
 
@@ -648,7 +633,7 @@ func layoutMarkdownParagraph(spans []markdownSpan, width float32) ([]markdownPar
 
 			part, rest := splitMarkdownToken(text, style, width-x)
 			if part != "" {
-				appendFragment(part, style)
+				appendFragment(part, token)
 				text = rest
 				if text != "" {
 					newLine()
@@ -669,7 +654,7 @@ func layoutMarkdownParagraph(spans []markdownSpan, width float32) ([]markdownPar
 				part = string(runes[:1])
 				rest = string(runes[1:])
 			}
-			appendFragment(part, style)
+			appendFragment(part, token)
 			text = rest
 			if text != "" {
 				newLine()
@@ -865,6 +850,13 @@ func markdownTextColor(style widget.RichTextStyle) color.Color {
 	return fyne.CurrentApp().Settings().Theme().Color(name, variant)
 }
 
+func markdownFragmentColor(fragment markdownParagraphFragment) color.Color {
+	if fragment.HasColor {
+		return fragment.Color
+	}
+	return markdownTextColor(fragment.Style)
+}
+
 func markdownLineHeight(style widget.RichTextStyle) float32 {
 	return fyne.MeasureText("Mg", markdownTextSize(style), style.TextStyle).Height
 }
@@ -880,21 +872,6 @@ func newBadgeButton(text string, minWidth float32, onTapped func()) *badgeButton
 	button := &badgeButton{
 		Text:      text,
 		Fill:      color.NRGBA{R: 0x4A, G: 0x4B, B: 0x50, A: 0xFF},
-		TextColor: color.White,
-		TextSize:  20,
-		MinWidth:  minWidth,
-		OnTapped:  onTapped,
-	}
-	button.ExtendBaseWidget(button)
-	return button
-}
-
-func newSplitBadgeButton(leftText, rightText string, minWidth float32, onTapped func()) *splitBadgeButton {
-	button := &splitBadgeButton{
-		LeftText:  leftText,
-		RightText: rightText,
-		LeftFill:  color.NRGBA{R: 0x4A, G: 0x4B, B: 0x50, A: 0xFF},
-		RightFill: color.NRGBA{R: 0x4A, G: 0x4B, B: 0x50, A: 0xFF},
 		TextColor: color.White,
 		TextSize:  20,
 		MinWidth:  minWidth,
@@ -933,97 +910,58 @@ func (b *badgeButton) Tapped(_ *fyne.PointEvent) {
 
 func (b *badgeButton) TappedSecondary(_ *fyne.PointEvent) {}
 
-func (b *splitBadgeButton) SetTexts(leftText, rightText string) {
-	b.LeftText = leftText
-	b.RightText = rightText
-	b.Refresh()
-}
-
-func (b *splitBadgeButton) SetFills(leftFill, rightFill color.Color) {
-	b.LeftFill = leftFill
-	b.RightFill = rightFill
-	b.Refresh()
-}
-
-func (b *splitBadgeButton) Enable() {
-	b.Disabled = false
-	b.Refresh()
-}
-
-func (b *splitBadgeButton) Disable() {
-	b.Disabled = true
-	b.Refresh()
-}
-
-func (b *splitBadgeButton) Tapped(_ *fyne.PointEvent) {
-	if b.Disabled || b.OnTapped == nil {
-		return
-	}
-	b.OnTapped()
-}
-
-func (b *splitBadgeButton) TappedSecondary(_ *fyne.PointEvent) {}
-
 func (b *badgeButton) CreateRenderer() fyne.WidgetRenderer {
 	bg := canvas.NewRectangle(b.Fill)
 	bg.CornerRadius = 12
+
+	var icon *widget.Icon
+	if b.Icon != nil {
+		icon = widget.NewIcon(b.Icon)
+	}
 
 	label := canvas.NewText(b.Text, b.TextColor)
 	label.Alignment = fyne.TextAlignCenter
 	label.TextStyle = fyne.TextStyle{Bold: true}
 	label.TextSize = b.TextSize
 
+	objects := []fyne.CanvasObject{bg}
+	if icon != nil {
+		objects = append(objects, icon)
+	}
+	objects = append(objects, label)
+
 	return &badgeButtonRenderer{
 		button:  b,
 		bg:      bg,
+		icon:    icon,
 		label:   label,
-		objects: []fyne.CanvasObject{bg, label},
-	}
-}
-
-func (b *splitBadgeButton) CreateRenderer() fyne.WidgetRenderer {
-	leftCap := canvas.NewRectangle(b.LeftFill)
-	leftCap.CornerRadius = 12
-
-	leftBody := canvas.NewRectangle(b.LeftFill)
-
-	rightBody := canvas.NewRectangle(b.RightFill)
-
-	rightCap := canvas.NewRectangle(b.RightFill)
-	rightCap.CornerRadius = 12
-
-	leftLabel := canvas.NewText(b.LeftText, b.TextColor)
-	leftLabel.Alignment = fyne.TextAlignCenter
-	leftLabel.TextStyle = fyne.TextStyle{Bold: true}
-	leftLabel.TextSize = b.TextSize
-
-	rightLabel := canvas.NewText(b.RightText, b.TextColor)
-	rightLabel.Alignment = fyne.TextAlignCenter
-	rightLabel.TextStyle = fyne.TextStyle{Bold: true}
-	rightLabel.TextSize = b.TextSize
-
-	separator := canvas.NewLine(color.NRGBA{R: 0x1B, G: 0x1E, B: 0x23, A: 0x66})
-	separator.StrokeWidth = 1
-
-	return &splitBadgeButtonRenderer{
-		button:     b,
-		leftCap:    leftCap,
-		leftBody:   leftBody,
-		rightBody:  rightBody,
-		rightCap:   rightCap,
-		leftLabel:  leftLabel,
-		rightLabel: rightLabel,
-		separator:  separator,
-		objects:    []fyne.CanvasObject{leftCap, leftBody, rightBody, rightCap, separator, leftLabel, rightLabel},
+		objects: objects,
 	}
 }
 
 func (r *badgeButtonRenderer) Layout(size fyne.Size) {
 	r.bg.Resize(size)
 
+	iconWidth := float32(0)
+	iconGap := float32(0)
+	if r.icon != nil {
+		iconSize := fyne.NewSize(18, 18)
+		r.icon.Resize(iconSize)
+		iconWidth = iconSize.Width
+		iconGap = 6
+	}
 	labelSize := r.label.MinSize()
+	contentWidth := labelSize.Width + iconWidth + iconGap
+	startX := (size.Width - contentWidth) / 2
+	if startX < 0 {
+		startX = 0
+	}
+	if r.icon != nil {
+		r.icon.Move(fyne.NewPos(startX, (size.Height-r.icon.Size().Height)/2))
+		startX += iconWidth + iconGap
+	}
 	r.label.Move(fyne.NewPos(
-		(size.Width-labelSize.Width)/2,
+		startX,
 		(size.Height-labelSize.Height)/2,
 	))
 	r.label.Resize(labelSize)
@@ -1032,6 +970,9 @@ func (r *badgeButtonRenderer) Layout(size fyne.Size) {
 func (r *badgeButtonRenderer) MinSize() fyne.Size {
 	width := r.button.MinWidth
 	labelWidth := r.label.MinSize().Width + 28
+	if r.icon != nil {
+		labelWidth += 24
+	}
 	if labelWidth > width {
 		width = labelWidth
 	}
@@ -1052,6 +993,10 @@ func (r *badgeButtonRenderer) Refresh() {
 	}
 	r.label.TextSize = r.button.TextSize
 	r.label.Refresh()
+	if r.icon != nil {
+		r.icon.SetResource(r.button.Icon)
+		r.icon.Refresh()
+	}
 
 	r.Layout(r.button.Size())
 }
@@ -1063,100 +1008,6 @@ func (r *badgeButtonRenderer) Objects() []fyne.CanvasObject {
 func (r *badgeButtonRenderer) Destroy() {}
 
 func (r *badgeButtonRenderer) BackgroundColor() color.Color {
-	return color.Transparent
-}
-
-func (r *splitBadgeButtonRenderer) Layout(size fyne.Size) {
-	leftWidth := size.Width / 2
-	rightWidth := size.Width - leftWidth
-	corner := float32(12)
-
-	r.leftCap.Move(fyne.NewPos(0, 0))
-	r.leftCap.Resize(fyne.NewSize(corner*2, size.Height))
-	r.leftBody.Move(fyne.NewPos(corner, 0))
-	r.leftBody.Resize(fyne.NewSize(leftWidth-corner, size.Height))
-
-	r.rightBody.Move(fyne.NewPos(leftWidth, 0))
-	r.rightBody.Resize(fyne.NewSize(rightWidth-corner, size.Height))
-	r.rightCap.Move(fyne.NewPos(size.Width-corner*2, 0))
-	r.rightCap.Resize(fyne.NewSize(corner*2, size.Height))
-
-	r.separator.Position1 = fyne.NewPos(leftWidth, 5)
-	r.separator.Position2 = fyne.NewPos(leftWidth, size.Height-5)
-
-	leftLabelSize := r.leftLabel.MinSize()
-	r.leftLabel.Move(fyne.NewPos(
-		(leftWidth-leftLabelSize.Width)/2,
-		(size.Height-leftLabelSize.Height)/2,
-	))
-	r.leftLabel.Resize(leftLabelSize)
-
-	rightLabelSize := r.rightLabel.MinSize()
-	r.rightLabel.Move(fyne.NewPos(
-		leftWidth+(rightWidth-rightLabelSize.Width)/2,
-		(size.Height-rightLabelSize.Height)/2,
-	))
-	r.rightLabel.Resize(rightLabelSize)
-}
-
-func (r *splitBadgeButtonRenderer) MinSize() fyne.Size {
-	leftWidth := canvas.NewText(r.button.LeftText, r.button.TextColor).MinSize().Width + 26
-	rightWidth := canvas.NewText(r.button.RightText, r.button.TextColor).MinSize().Width + 24
-	halfWidth := leftWidth
-	if rightWidth > halfWidth {
-		halfWidth = rightWidth
-	}
-	if halfWidth < 62 {
-		halfWidth = 62
-	}
-	width := halfWidth * 2
-	if width < r.button.MinWidth {
-		width = r.button.MinWidth
-	}
-	return fyne.NewSize(width, headerControlHeight)
-}
-
-func (r *splitBadgeButtonRenderer) Refresh() {
-	leftFill := r.button.LeftFill
-	rightFill := r.button.RightFill
-	if r.button.Disabled {
-		leftFill = disabledBadgeFill(leftFill)
-		rightFill = disabledBadgeFill(rightFill)
-	}
-	r.leftCap.FillColor = leftFill
-	r.leftCap.Refresh()
-	r.leftBody.FillColor = leftFill
-	r.leftBody.Refresh()
-	r.rightBody.FillColor = rightFill
-	r.rightBody.Refresh()
-	r.rightCap.FillColor = rightFill
-	r.rightCap.Refresh()
-
-	r.leftLabel.Text = r.button.LeftText
-	r.leftLabel.Color = r.button.TextColor
-	r.rightLabel.Text = r.button.RightText
-	r.rightLabel.Color = r.button.TextColor
-	if r.button.Disabled {
-		disabledText := color.NRGBA{R: 0xE0, G: 0xE3, B: 0xE8, A: 0xD8}
-		r.leftLabel.Color = disabledText
-		r.rightLabel.Color = disabledText
-	}
-	r.leftLabel.TextSize = r.button.TextSize
-	r.rightLabel.TextSize = r.button.TextSize
-	r.leftLabel.Refresh()
-	r.rightLabel.Refresh()
-	r.separator.Refresh()
-
-	r.Layout(r.button.Size())
-}
-
-func (r *splitBadgeButtonRenderer) Objects() []fyne.CanvasObject {
-	return r.objects
-}
-
-func (r *splitBadgeButtonRenderer) Destroy() {}
-
-func (r *splitBadgeButtonRenderer) BackgroundColor() color.Color {
 	return color.Transparent
 }
 
@@ -1222,25 +1073,6 @@ func Run(ctx context.Context, rootCfg config.Config, configPath string, logger *
 		gui.fyneApp.Quit()
 	})
 
-	if driver, err := light.NewWS2812Driver(light.WS2812Config{
-		Enabled:    cfg.LED.Enabled,
-		Pixels:     cfg.LED.Pixels,
-		Brightness: cfg.LED.Brightness,
-		GPIOPin:    cfg.LED.GPIOPin,
-		DmaNum:     cfg.LED.DmaNum,
-		Frequency:  cfg.LED.Frequency,
-	}, logger); err == nil {
-		gui.lightRunner = light.NewRunner(light.NewDefaultStateMachine(), driver, cfg.LED.Pixels)
-		gui.lightRunner.Update(gui.lastStatus.ToSnapshot(), nil)
-		go func() {
-			if err := gui.lightRunner.Run(childCtx); err != nil && logger != nil {
-				logger.Printf("uconsole light runner failed: %v", err)
-			}
-		}()
-	} else if logger != nil {
-		logger.Printf("uconsole LED disabled: %v", err)
-	}
-
 	gui.installKeyHandlers()
 	gui.render()
 
@@ -1287,16 +1119,12 @@ func (a *App) buildUI() fyne.CanvasObject {
 	a.badgeFill.SetMinSize(fyne.NewSize(148, headerControlHeight))
 	a.badgeFill.CornerRadius = 12
 
-	a.exitNodeButton = newSplitBadgeButton("TS", "Exit", 132, a.toggleExitNodeMenu)
-	a.exitNodeMenu = container.NewVBox()
-
 	a.serverStrip = container.NewHBox(widget.NewLabel("No servers configured"))
 	serverStripScroll := container.NewHScroll(a.serverStrip)
 	serverStripScroll.SetMinSize(fyne.NewSize(260, headerControlHeight))
 
 	leftGroup := container.NewHBox(
 		container.NewCenter(container.NewStack(a.badgeFill, container.NewCenter(a.badgeLabel))),
-		container.NewCenter(a.exitNodeButton),
 	)
 
 	rightGroup := container.NewHBox(
@@ -1335,10 +1163,7 @@ func (a *App) buildUI() fyne.CanvasObject {
 		serverStripScroll,
 	)
 
-	topBar := container.NewVBox(
-		header,
-		a.exitNodeMenu,
-	)
+	topBar := container.NewVBox(header)
 
 	return container.NewMax(
 		a.bgFill,
@@ -1395,6 +1220,16 @@ func (a *App) installKeyHandlers() {
 		case fyne.KeyK:
 			a.scrollBy(-88)
 			a.startScrollHold(fyne.KeyK, -88)
+		case fyne.KeyDown:
+			a.scrollBy(88)
+			a.startScrollHold(fyne.KeyDown, 88)
+		case fyne.KeyUp:
+			a.scrollBy(-88)
+			a.startScrollHold(fyne.KeyUp, -88)
+		case fyne.KeyLeft:
+			a.scrollBy(-a.pageScrollDelta())
+		case fyne.KeyRight:
+			a.scrollBy(a.pageScrollDelta())
 		case fyne.KeyR:
 			go a.runManualRefresh()
 		case fyne.KeyS:
@@ -1417,7 +1252,7 @@ func (a *App) installKeyHandlers() {
 		})
 		deskCanvas.SetOnKeyUp(func(event *fyne.KeyEvent) {
 			switch event.Name {
-			case fyne.KeyJ, fyne.KeyK:
+			case fyne.KeyJ, fyne.KeyK, fyne.KeyUp, fyne.KeyDown:
 				a.stopScrollHold(event.Name)
 			default:
 				a.stopOpenShortcutHold(event.Name)
@@ -1432,6 +1267,8 @@ func (a *App) handleModalKey(name fyne.KeyName) bool {
 	settingsEditor := a.settingsEditor
 	settingsDelete := a.settingsDelete
 	continueConfirm := a.continueConfirm
+	voiceDialog := a.voiceDialog
+	voiceRecordDialog := a.voiceRecordDialog
 	helpDialog := a.helpDialog
 	a.stateMu.RUnlock()
 
@@ -1468,6 +1305,37 @@ func (a *App) handleModalKey(name fyne.KeyName) bool {
 			return true
 		case fyne.KeyReturn, fyne.KeyEnter:
 			continueConfirm.Confirm()
+			return true
+		default:
+			return false
+		}
+	}
+
+	if voiceDialog != nil {
+		switch name {
+		case fyne.KeyEscape:
+			voiceDialog.Hide()
+			return true
+		case fyne.KeyReturn, fyne.KeyEnter:
+			voiceDialog.Submit()
+			return true
+		default:
+			return false
+		}
+	}
+
+	if voiceRecordDialog != nil {
+		switch name {
+		case fyne.KeyEscape:
+			voiceRecordDialog.Hide()
+			return true
+		case fyne.KeyReturn, fyne.KeyEnter:
+			a.stateMu.RLock()
+			actionKey := a.openHoldActionKey
+			a.stateMu.RUnlock()
+			if actionKey != "" {
+				a.finishVoiceClick(actionKey, false)
+			}
 			return true
 		default:
 			return false
@@ -1513,6 +1381,8 @@ func (a *App) hasBlockingDialog() bool {
 		a.settingsEditor != nil ||
 		a.settingsDelete != nil ||
 		a.continueConfirm != nil ||
+		a.voiceDialog != nil ||
+		a.voiceRecordDialog != nil ||
 		a.helpDialog != nil ||
 		a.notifDialog != nil
 }
@@ -1523,6 +1393,10 @@ func (a *App) handleOpenShortcutKeyDown(key fyne.KeyName) {
 	}
 
 	a.stateMu.RLock()
+	if a.openHoldActionKey != "" {
+		a.stateMu.RUnlock()
+		return
+	}
 	actionKey, ok := a.openActionByShortcut[key]
 	if !ok || a.openActionPending[actionKey] {
 		a.stateMu.RUnlock()
@@ -1539,6 +1413,10 @@ func (a *App) handleOpenShortcutKeyDown(key fyne.KeyName) {
 		return
 	}
 
+	if kind == openSessionActionVoice {
+		a.startVoiceShortcutHold(key, actionKey, *session)
+		return
+	}
 	a.startOpenShortcutHold(key, actionKey, *session, kind)
 }
 
@@ -1604,6 +1482,10 @@ func (a *App) stopOpenShortcutHold(key fyne.KeyName) {
 	active := a.openHoldKey == key
 	a.stateMu.RUnlock()
 	if !active {
+		return
+	}
+	if _, kind := parseOpenSessionActionKey(actionKey); kind == openSessionActionVoice {
+		a.finishVoiceShortcutHold(key, actionKey)
 		return
 	}
 	a.clearOpenShortcutHold(key, actionKey)
@@ -1684,13 +1566,12 @@ func (a *App) refreshNow(ctx context.Context, force bool) error {
 	servers, clients, previous := a.serverTargets()
 	snapshots := a.loadAllServers(ctx, servers, clients, previous, force)
 	status, notifications, connected, errSummary := aggregateSnapshots(snapshots)
-	tsState := loadTailscaleState(ctx)
 
 	var err error
 	if errSummary != "" {
 		err = fmt.Errorf(errSummary)
 	}
-	a.applyState(status, notifications, snapshots, connected, err, tsState)
+	a.applyState(status, notifications, snapshots, connected, err)
 	return err
 }
 
@@ -1938,7 +1819,7 @@ func stateRank(state model.State) int {
 		return 5
 	case model.StateAttention:
 		return 4
-	case model.StateRunning, model.StateRunningBash:
+	case model.StateRun, model.StateRunning, model.StateRunningBash:
 		return 3
 	case model.StateIdle:
 		return 2
@@ -1958,7 +1839,7 @@ func notificationPriority(item NotificationResponse) int {
 	return score
 }
 
-func (a *App) applyState(status StatusResponse, notifications []NotificationResponse, snapshots []serverSnapshot, connected bool, err error, tsState tailscaleState) {
+func (a *App) applyState(status StatusResponse, notifications []NotificationResponse, snapshots []serverSnapshot, connected bool, err error) {
 	snapshotMap := make(map[string]serverSnapshot, len(snapshots))
 	for _, snapshot := range snapshots {
 		snapshotMap[snapshot.Server.ID] = snapshot
@@ -1968,7 +1849,6 @@ func (a *App) applyState(status StatusResponse, notifications []NotificationResp
 	a.lastStatus = status
 	a.lastNotifs = notifications
 	a.serverSnapshots = snapshotMap
-	a.tailscaleState = tsState
 	a.syncOpenSessionShortcutsLocked(status.Sessions)
 	a.connected = connected
 	if connected {
@@ -1978,15 +1858,6 @@ func (a *App) applyState(status StatusResponse, notifications []NotificationResp
 		a.lastError = err.Error()
 	} else {
 		a.lastError = ""
-	}
-	primary := a.primaryNotificationLocked()
-	if a.lightRunner != nil {
-		var notification *model.NotificationSnapshot
-		if primary != nil {
-			item := primary.ToSnapshot()
-			notification = &item
-		}
-		a.lightRunner.Update(status.ToSnapshot(), notification)
 	}
 	a.stateMu.Unlock()
 
@@ -2010,9 +1881,6 @@ func (a *App) render() {
 	status := a.lastStatus
 	servers := append([]BuddyServer(nil), a.servers...)
 	pendingSessions := clonePendingMap(a.openActionPending)
-	tsState := a.tailscaleState
-	exitNodeMenuOpen := a.exitNodeMenuOpen
-	tailscaleBusy := a.tailscaleBusy
 	snapshots := make([]serverSnapshot, 0, len(servers))
 	for _, server := range servers {
 		if snapshot, ok := a.serverSnapshots[server.ID]; ok {
@@ -2062,7 +1930,6 @@ func (a *App) render() {
 	} else {
 		a.updatedLabel.SetText("Updated " + status.ServerTime.Local().Format("15:04:05"))
 	}
-	a.renderTailscale(tsState, darkMode, exitNodeMenuOpen, tailscaleBusy)
 
 	a.renderServerStrip(snapshots, darkMode)
 	a.renderSessionList(openSessions, otherSessions, darkMode)
@@ -2100,7 +1967,7 @@ func (a *App) renderSessionList(openSessions, otherSessions []SessionResponse, d
 			}
 			a.openSessionSection.Hide()
 		} else {
-			objects, stickyRows := openSessionListObjects(openSessions, darkMode, view)
+			objects, stickyRows := a.openSessionListObjects(openSessions, darkMode, view)
 			a.openStickyRows = stickyRows
 			a.openSessionList.Objects = objects
 			a.openSessionList.Refresh()
@@ -2157,7 +2024,7 @@ func (a *App) refreshOpenSessionStickyRows() {
 
 	view := a.currentOpenSessionListState()
 	darkMode := a.effectiveDarkMode()
-	header := buildOpenSessionHeader(active.session, darkMode, view)
+	header := a.buildOpenSessionHeader(active.session, darkMode, view)
 	fill := canvas.NewRectangle(cardFill(darkMode))
 	fill.CornerRadius = 10
 	panel := container.NewStack(fill, container.NewPadded(header))
@@ -2273,6 +2140,8 @@ func (a *App) executeOpenSessionAction(session SessionResponse, kind openSession
 		}
 		a.setStatusLine("Continue sent")
 		_ = a.refreshNow(context.Background(), true)
+	case openSessionActionVoice:
+		a.setStatusLine("Hold the voice shortcut to record a spoken follow-up")
 	case openSessionActionClose:
 		client := a.clientForServer(session.ServerID)
 		if client == nil {
@@ -3123,7 +2992,7 @@ func badgeStyle(state model.State) (string, color.NRGBA) {
 	switch state {
 	case model.StateIdle:
 		return "idle", color.NRGBA{R: 0x58, G: 0x72, B: 0x58, A: 0xFF}
-	case model.StateRunning, model.StateRunningBash:
+	case model.StateRun, model.StateRunning, model.StateRunningBash:
 		return "RUN", color.NRGBA{R: 0x19, G: 0x5F, B: 0x92, A: 0xFF}
 	case model.StateAttention:
 		return "open", color.NRGBA{R: 0xBC, G: 0x7A, B: 0x00, A: 0xFF}
@@ -3141,7 +3010,7 @@ func titleForState(state model.State) string {
 		return "Open"
 	case model.StateError:
 		return "This run hit an error"
-	case model.StateRunning, model.StateRunningBash:
+	case model.StateRun, model.StateRunning, model.StateRunningBash:
 		return "Codex is working"
 	case model.StateIdle:
 		return "Currently idle"
@@ -3160,7 +3029,7 @@ func summaryForState(state model.State, connected bool, lastError string) string
 		return "A run just finished. It is open for a follow-up step."
 	case model.StateError:
 		return "An error notification will pop up when intervention is needed."
-	case model.StateRunning, model.StateRunningBash:
+	case model.StateRun, model.StateRunning, model.StateRunningBash:
 		return "Remote session is active. Alerts and quick actions stay available here."
 	case model.StateIdle:
 		return "There is no active task right now."
@@ -3174,7 +3043,7 @@ func sessionBadgeStyle(state model.State) (string, color.NRGBA) {
 	switch state {
 	case model.StateIdle:
 		return "idle", color.NRGBA{R: 0x58, G: 0x72, B: 0x58, A: 0xFF}
-	case model.StateRunning, model.StateRunningBash:
+	case model.StateRun, model.StateRunning, model.StateRunningBash:
 		return "RUN", color.NRGBA{R: 0x19, G: 0x5F, B: 0x92, A: 0xFF}
 	case model.StateAttention:
 		return "open", color.NRGBA{R: 0xBC, G: 0x7A, B: 0x00, A: 0xFF}
@@ -3246,14 +3115,11 @@ func splitSessionsByOpenState(sessions []SessionResponse, _ map[string]bool) ([]
 	return openSessions, otherSessions
 }
 
-func openSessionListObjects(sessions []SessionResponse, darkMode bool, state sessionListState) ([]fyne.CanvasObject, []*stickySessionRow) {
-	objects := []fyne.CanvasObject{metaText("Hold a shown letter to continue, close, or jump.", darkMode)}
+func (a *App) openSessionListObjects(sessions []SessionResponse, darkMode bool, state sessionListState) ([]fyne.CanvasObject, []*stickySessionRow) {
+	objects := make([]fyne.CanvasObject, 0, len(sessions)*2)
 	rows := make([]*stickySessionRow, 0, len(sessions))
-	if len(sessions) > 0 {
-		objects = append(objects, widget.NewSeparator())
-	}
 	for i, session := range sessions {
-		row := openSessionRow(session, darkMode, state)
+		row := a.openSessionRow(session, darkMode, state)
 		rows = append(rows, row)
 		objects = append(objects, row.root)
 		if i < len(sessions)-1 {
@@ -3278,8 +3144,8 @@ func sessionListObjects(sessions []SessionResponse, hasOpenSessions bool, darkMo
 	return objects
 }
 
-func openSessionRow(session SessionResponse, darkMode bool, state sessionListState) *stickySessionRow {
-	header := buildOpenSessionHeader(session, darkMode, state)
+func (a *App) openSessionRow(session SessionResponse, darkMode bool, state sessionListState) *stickySessionRow {
+	header := a.buildOpenSessionHeader(session, darkMode, state)
 
 	summary := sessionSummaryObject(session, darkMode, "Waiting for approval")
 
@@ -3307,7 +3173,7 @@ func openSessionRow(session SessionResponse, darkMode bool, state sessionListSta
 	return row
 }
 
-func buildOpenSessionHeader(session SessionResponse, darkMode bool, state sessionListState) fyne.CanvasObject {
+func (a *App) buildOpenSessionHeader(session SessionResponse, darkMode bool, state sessionListState) fyne.CanvasObject {
 	title := widget.NewLabelWithStyle(sessionListTitle(session), fyne.TextAlignLeading, fyne.TextStyle{Bold: true})
 	title.Wrapping = fyne.TextWrapOff
 	title.Truncation = fyne.TextTruncateEllipsis
@@ -3315,16 +3181,26 @@ func buildOpenSessionHeader(session SessionResponse, darkMode bool, state sessio
 	actionBadges := []fyne.CanvasObject{sourceBadge(session.ServerName, session.ServerID, darkMode)}
 	for _, kind := range []openSessionActionKind{
 		openSessionActionContinue,
+		openSessionActionVoice,
 		openSessionActionClose,
 		openSessionActionJump,
 	} {
 		actionKey := openSessionActionKey(session, kind)
+		var onTapped func()
+		if kind == openSessionActionVoice {
+			sessionCopy := session
+			actionKeyCopy := actionKey
+			onTapped = func() {
+				a.startVoiceClick(actionKeyCopy, sessionCopy)
+			}
+		}
 		actionBadges = append(actionBadges, openSessionActionBadge(
 			kind,
 			state.shortcuts[actionKey],
 			state.holdActionKey == actionKey && state.holdProgress > 0,
 			state.pending[actionKey],
 			isOpenSessionActionAvailable(session, kind),
+			onTapped,
 		))
 	}
 	badges := container.NewHBox(actionBadges...)
@@ -3364,7 +3240,7 @@ func (r *stickySessionRow) setStickyState(active bool, offset float32) {
 	r.root.Refresh()
 }
 
-func openSessionActionBadge(kind openSessionActionKind, key fyne.KeyName, active bool, pending bool, enabled bool) fyne.CanvasObject {
+func openSessionActionBadge(kind openSessionActionKind, key fyne.KeyName, active bool, pending bool, enabled bool, onTapped func()) fyne.CanvasObject {
 	label := openSessionActionLabel(kind)
 	fill := color.NRGBA{R: 0x4A, G: 0x4B, B: 0x50, A: 0xFF}
 	textColor := color.Color(color.White)
@@ -3372,19 +3248,32 @@ func openSessionActionBadge(kind openSessionActionKind, key fyne.KeyName, active
 
 	switch {
 	case pending:
-		display = label + "..."
+		display = label + "(...)"
 		fill = color.NRGBA{R: 0x2D, G: 0x7A, B: 0x52, A: 0xFF}
 	case !enabled:
-		display = label + " off"
+		display = label + "(off)"
 		textColor = color.NRGBA{R: 0xCF, G: 0xD4, B: 0xDB, A: 0xFF}
 	case key != "":
-		display = label + " " + strings.ToUpper(string(key))
+		display = label + "(" + strings.ToUpper(string(key)) + ")"
 		if active {
 			fill = color.NRGBA{R: 0xBC, G: 0x7A, B: 0x00, A: 0xFF}
 		}
 	default:
-		display = label + " -"
+		display = label + "(-)"
 		textColor = color.NRGBA{R: 0xCF, G: 0xD4, B: 0xDB, A: 0xFF}
+	}
+
+	if onTapped != nil {
+		button := newBadgeButton(display, 132, onTapped)
+		button.Fill = fill
+		button.TextColor = textColor
+		button.TextSize = 18
+		button.Disabled = !enabled || pending
+		if kind == openSessionActionVoice {
+			button.Icon = theme.MediaRecordIcon()
+			button.MinWidth = 156
+		}
+		return button
 	}
 
 	bg := canvas.NewRectangle(fill)
@@ -3392,11 +3281,17 @@ func openSessionActionBadge(kind openSessionActionKind, key fyne.KeyName, active
 	bg.CornerRadius = 10
 
 	text := canvas.NewText(display, textColor)
-	text.Alignment = fyne.TextAlignCenter
 	text.TextStyle = fyne.TextStyle{Bold: true}
 	text.TextSize = 18
 
-	return container.NewStack(bg, container.NewCenter(text))
+	content := fyne.CanvasObject(container.NewCenter(text))
+	if kind == openSessionActionVoice {
+		icon := widget.NewIcon(theme.MediaRecordIcon())
+		content = container.NewCenter(container.NewHBox(icon, text))
+		bg.SetMinSize(fyne.NewSize(156, 32))
+	}
+
+	return container.NewStack(bg, content)
 }
 
 func serverRow(snapshot serverSnapshot, darkMode bool) fyne.CanvasObject {
@@ -3552,193 +3447,6 @@ func (a *App) showDeleteServerConfirm(server BuddyServer) {
 	a.settingsDelete = confirm
 	a.stateMu.Unlock()
 	confirm.Show()
-}
-
-func (a *App) toggleExitNodeMenu() {
-	a.stateMu.Lock()
-	a.exitNodeMenuOpen = !a.exitNodeMenuOpen
-	a.stateMu.Unlock()
-	fyne.Do(a.render)
-}
-
-func (a *App) setExitNode(node tailscaleExitNode) {
-	target := strings.TrimSpace(node.IP)
-	if target == "" {
-		target = strings.TrimSpace(node.Name)
-	}
-	go a.updateExitNode(target, "Exit node enabled: "+valueOrDash(node.Name))
-}
-
-func (a *App) disableExitNode() {
-	go a.updateExitNode("", "Exit node disabled")
-}
-
-func (a *App) updateExitNode(ip, successMessage string) {
-	a.stateMu.Lock()
-	a.tailscaleBusy = true
-	a.stateMu.Unlock()
-	fyne.Do(a.render)
-
-	ctx, cancel := context.WithTimeout(context.Background(), 6*time.Second)
-	defer cancel()
-	err := setTailscaleExitNode(ctx, ip)
-
-	a.stateMu.Lock()
-	a.tailscaleBusy = false
-	if err == nil {
-		a.exitNodeMenuOpen = false
-	}
-	a.stateMu.Unlock()
-
-	if err != nil {
-		fyne.Do(func() {
-			a.render()
-			dialog.ShowError(err, a.window)
-		})
-		return
-	}
-
-	a.setStatusLine(successMessage)
-	_ = a.refreshNow(context.Background(), true)
-}
-
-func (a *App) renderTailscale(state tailscaleState, darkMode bool, menuOpen bool, busy bool) {
-	a.exitNodeButton.SetTexts("TS", exitNodeButtonLabel(state))
-	a.exitNodeButton.SetFills(tailscaleSegmentFill(state), exitNodeBadgeFill(state))
-	if busy || !state.Installed {
-		a.exitNodeButton.Disable()
-	} else {
-		a.exitNodeButton.Enable()
-	}
-	a.exitNodeButton.Refresh()
-
-	if !menuOpen {
-		a.exitNodeMenu.Objects = nil
-		a.exitNodeMenu.Refresh()
-		return
-	}
-
-	bodyItems := []fyne.CanvasObject{
-		widget.NewLabelWithStyle("Exit Nodes", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
-		metaText("Click current node again to disable it.", darkMode),
-	}
-
-	switch {
-	case state.Error != "":
-		bodyItems = append(bodyItems, metaText(briefError(state.Error, 120), darkMode))
-	case len(state.ExitNodes) == 0 && state.ExitNodeName == "":
-		bodyItems = append(bodyItems, metaText("No exit nodes available", darkMode))
-	default:
-		if state.ExitNodeName != "" && !tailscaleCurrentNodeListed(state) {
-			disableCurrent := widget.NewButton("Current: "+state.ExitNodeName+" (disable)", a.disableExitNode)
-			if busy {
-				disableCurrent.Disable()
-			}
-			bodyItems = append(bodyItems, disableCurrent)
-		}
-		for _, node := range state.ExitNodes {
-			node := node
-			button := widget.NewButton(exitNodeMenuLabel(node), func() {
-				if node.Current {
-					a.disableExitNode()
-					return
-				}
-				a.setExitNode(node)
-			})
-			if busy || (!node.Online && !node.Current) {
-				button.Disable()
-			}
-			if node.Current {
-				button.Importance = widget.HighImportance
-			}
-			bodyItems = append(bodyItems, button)
-		}
-	}
-
-	fillRect := canvas.NewRectangle(cardFill(darkMode))
-	fillRect.CornerRadius = 18
-
-	border := canvas.NewRectangle(color.Transparent)
-	border.CornerRadius = 18
-	border.StrokeWidth = 1.5
-	border.StrokeColor = cardBorder(darkMode, false)
-
-	a.exitNodeMenu.Objects = []fyne.CanvasObject{
-		container.NewStack(
-			fillRect,
-			border,
-			container.NewPadded(container.NewVBox(bodyItems...)),
-		),
-	}
-	a.exitNodeMenu.Refresh()
-}
-
-func tailscaleSegmentFill(state tailscaleState) color.Color {
-	switch {
-	case state.Online:
-		return color.NRGBA{R: 0x2D, G: 0x7A, B: 0x52, A: 0xFF}
-	default:
-		return color.NRGBA{R: 0x4A, G: 0x4B, B: 0x50, A: 0xFF}
-	}
-}
-
-func exitNodeButtonLabel(state tailscaleState) string {
-	if state.Error != "" {
-		return "Exit !"
-	}
-	return "Exit"
-}
-
-func exitNodeBadgeFill(state tailscaleState) color.Color {
-	switch {
-	case !state.Installed:
-		return color.NRGBA{R: 0x34, G: 0x35, B: 0x39, A: 0xFF}
-	case state.Error != "":
-		return color.NRGBA{R: 0x8A, G: 0x61, B: 0x18, A: 0xFF}
-	case state.ExitNodeName != "":
-		return color.NRGBA{R: 0x2D, G: 0x7A, B: 0x52, A: 0xFF}
-	default:
-		return color.NRGBA{R: 0x4A, G: 0x4B, B: 0x50, A: 0xFF}
-	}
-}
-
-func exitNodeMenuLabel(node tailscaleExitNode) string {
-	label := node.Name
-	if label == "" {
-		label = valueOrDash(node.IP)
-	}
-	switch {
-	case node.Current:
-		return label + " (disable)"
-	case !node.Online:
-		return label + " (offline)"
-	default:
-		return label
-	}
-}
-
-func tailscaleCurrentNodeListed(state tailscaleState) bool {
-	for _, node := range state.ExitNodes {
-		if node.Current {
-			return true
-		}
-	}
-	return false
-}
-
-func compactExitNodeName(name string) string {
-	trimmed := strings.TrimSpace(name)
-	if trimmed == "" {
-		return ""
-	}
-	trimmed = strings.TrimSuffix(trimmed, ".")
-	if parts := strings.Split(trimmed, "."); len(parts) > 0 && parts[0] != "" {
-		trimmed = parts[0]
-	}
-	if len(trimmed) > 14 {
-		return trimmed[:14]
-	}
-	return trimmed
 }
 
 func disabledBadgeFill(fill color.Color) color.Color {
@@ -3950,7 +3658,7 @@ func spacedMarkdownObjects(objects []fyne.CanvasObject) []fyne.CanvasObject {
 	for i, object := range objects {
 		if i > 0 {
 			gap := canvas.NewRectangle(color.Transparent)
-			gap.SetMinSize(fyne.NewSize(1, markdownLineHeight(widget.RichTextStyleInline)))
+			gap.SetMinSize(fyne.NewSize(1, markdownLineHeight(widget.RichTextStyleInline)*0.5))
 			spaced = append(spaced, gap)
 		}
 		spaced = append(spaced, object)
@@ -4093,10 +3801,14 @@ func htmlAppendInlineNode(lines *[][]markdownSpan, node *xhtml.Node, style widge
 			*lines = append(*lines, nil)
 			return
 		case "code":
-			htmlAppendLineSpan(lines, markdownSpan{
-				Text:  htmlNodePlainText(node),
-				Style: mergedMarkdownStyle(style, markdownCodeInlineStyle()),
-			})
+			for _, span := range highlightedInlineCodeSpans(htmlNodePlainText(node), fyne.CurrentApp().Settings().ThemeVariant() == theme.VariantDark) {
+				htmlAppendLineSpan(lines, markdownSpan{
+					Text:     span.Text,
+					Style:    mergedMarkdownStyle(style, span.Style),
+					Color:    span.Color,
+					HasColor: span.HasColor,
+				})
+			}
 			return
 		case "a":
 			linkStyle := mergedMarkdownStyle(style, markdownLinkStyle())
@@ -4383,13 +4095,13 @@ func markdownObjects(segments []widget.RichTextSegment, darkMode bool) []fyne.Ca
 				objects = append(objects, newMarkdownCodeBlockObject(item.Text, darkMode))
 				continue
 			}
-			objects = append(objects, newMarkdownParagraph([]markdownSpan{markdownSpanFromTextSegment(item)}))
+			objects = append(objects, newMarkdownParagraph(markdownSpanFromTextSegment(item, darkMode)))
 		case *widget.ParagraphSegment:
 			if text, ok := markdownCodeOnlyText(item.Texts); ok {
 				objects = append(objects, newMarkdownCodeBlockObject(text, darkMode))
 				continue
 			}
-			if spans := markdownSpans(item.Texts); len(spans) > 0 {
+			if spans := markdownSpans(item.Texts, darkMode); len(spans) > 0 {
 				objects = append(objects, newMarkdownParagraph(spans))
 			}
 		case *widget.ListSegment:
@@ -4438,7 +4150,7 @@ func markdownCodeOnlyText(segments []widget.RichTextSegment) (string, bool) {
 	return strings.Trim(builder.String(), "\n"), true
 }
 
-func markdownSpans(segments []widget.RichTextSegment) []markdownSpan {
+func markdownSpans(segments []widget.RichTextSegment, darkMode bool) []markdownSpan {
 	spans := make([]markdownSpan, 0, len(segments))
 	for _, segment := range segments {
 		switch item := segment.(type) {
@@ -4446,31 +4158,31 @@ func markdownSpans(segments []widget.RichTextSegment) []markdownSpan {
 			if item.Style == widget.RichTextStyleCodeBlock {
 				continue
 			}
-			spans = append(spans, markdownSpanFromTextSegment(item))
+			spans = append(spans, markdownSpanFromTextSegment(item, darkMode)...)
 		case *widget.HyperlinkSegment:
 			spans = append(spans, markdownSpan{
 				Text:  item.Text,
 				Style: markdownLinkStyle(),
 			})
 		case *widget.ParagraphSegment:
-			spans = append(spans, markdownSpans(item.Texts)...)
+			spans = append(spans, markdownSpans(item.Texts, darkMode)...)
 		}
 	}
 	return compactMarkdownSpans(spans)
 }
 
-func markdownSpanFromTextSegment(segment *widget.TextSegment) markdownSpan {
+func markdownSpanFromTextSegment(segment *widget.TextSegment, darkMode bool) []markdownSpan {
 	style := segment.Style
 	switch segment.Style {
 	case widget.RichTextStyleCodeInline:
-		style = markdownCodeInlineStyle()
+		return highlightedInlineCodeSpans(segment.Text, darkMode)
 	case widget.RichTextStyleInline:
 		style = widget.RichTextStyleInline
 	}
-	return markdownSpan{
+	return []markdownSpan{{
 		Text:  segment.Text,
 		Style: style,
-	}
+	}}
 }
 
 func markdownCodeInlineStyle() widget.RichTextStyle {
@@ -4537,18 +4249,7 @@ func (s *markdownCodeBlockSegment) SelectedText() string {
 func (s *markdownCodeBlockSegment) Unselect() {}
 
 func newMarkdownCodeBlockObject(text string, darkMode bool) fyne.CanvasObject {
-	_ = darkMode
-
-	code := widget.NewRichText(&widget.TextSegment{
-		Style: widget.RichTextStyle{
-			Inline:    false,
-			SizeName:  theme.SizeNameText,
-			TextStyle: fyne.TextStyle{Monospace: true, Bold: true},
-		},
-		Text: text,
-	})
-	code.Wrapping = fyne.TextWrapBreak
-	return code
+	return newHighlightedCodeBlockObject(text, darkMode)
 }
 
 func metaForeground(darkMode bool) color.Color {
@@ -4639,11 +4340,16 @@ func findSessionByActionKey(sessions []SessionResponse, actionKey string) *Sessi
 }
 
 func isOpenSession(session SessionResponse) bool {
-	return session.State == model.StateAttention
+	state := normalizeCompatState(session.State)
+	return state == model.StateOpen || session.NeedsOpen
 }
 
 func canContinueSession(session SessionResponse) bool {
 	return session.CanContinue && session.ContinueAction != nil
+}
+
+func canVoiceSession(session SessionResponse) bool {
+	return canContinueSession(session)
 }
 
 func canCloseSession(session SessionResponse) bool {
@@ -4658,6 +4364,8 @@ func isOpenSessionActionAvailable(session SessionResponse, kind openSessionActio
 	switch kind {
 	case openSessionActionContinue:
 		return canContinueSession(session)
+	case openSessionActionVoice:
+		return canVoiceSession(session)
 	case openSessionActionClose:
 		return canCloseSession(session)
 	case openSessionActionJump:
@@ -4671,6 +4379,8 @@ func openSessionActionLabel(kind openSessionActionKind) string {
 	switch kind {
 	case openSessionActionContinue:
 		return "Continue"
+	case openSessionActionVoice:
+		return "Voice"
 	case openSessionActionClose:
 		return "Close"
 	case openSessionActionJump:
@@ -4684,6 +4394,8 @@ func openSessionActionVerb(kind openSessionActionKind) string {
 	switch kind {
 	case openSessionActionContinue:
 		return "continue"
+	case openSessionActionVoice:
+		return "record voice"
 	case openSessionActionClose:
 		return "close"
 	case openSessionActionJump:
@@ -4708,6 +4420,7 @@ func parseOpenSessionActionKey(actionKey string) (string, openSessionActionKind)
 func openSessionActionKeys(session SessionResponse) []string {
 	kinds := []openSessionActionKind{
 		openSessionActionContinue,
+		openSessionActionVoice,
 		openSessionActionClose,
 		openSessionActionJump,
 	}
@@ -4723,6 +4436,7 @@ func openSessionActionKeys(session SessionResponse) []string {
 func openSessionActionHintText(session SessionResponse, state sessionListState) string {
 	for _, kind := range []openSessionActionKind{
 		openSessionActionContinue,
+		openSessionActionVoice,
 		openSessionActionClose,
 		openSessionActionJump,
 	} {
@@ -4732,6 +4446,12 @@ func openSessionActionHintText(session SessionResponse, state sessionListState) 
 		}
 		if state.holdActionKey == actionKey && state.holdProgress > 0 {
 			key := state.shortcuts[actionKey]
+			if kind == openSessionActionVoice {
+				if key != "" {
+					return "Release " + strings.ToUpper(string(key)) + " to transcribe voice input"
+				}
+				return "Release to transcribe voice input"
+			}
 			if key != "" {
 				return "Hold " + strings.ToUpper(string(key)) + " for " + state.holdLabel + " to " + openSessionActionVerb(kind)
 			}
@@ -4742,6 +4462,7 @@ func openSessionActionHintText(session SessionResponse, state sessionListState) 
 	available := make([]string, 0, 3)
 	for _, kind := range []openSessionActionKind{
 		openSessionActionContinue,
+		openSessionActionVoice,
 		openSessionActionClose,
 		openSessionActionJump,
 	} {
@@ -4751,6 +4472,10 @@ func openSessionActionHintText(session SessionResponse, state sessionListState) 
 		key := state.shortcuts[openSessionActionKey(session, kind)]
 		if key == "" {
 			available = append(available, openSessionActionLabel(kind)+" key unavailable")
+			continue
+		}
+		if kind == openSessionActionVoice {
+			available = append(available, strings.ToUpper(string(key))+" voice")
 			continue
 		}
 		available = append(available, strings.ToUpper(string(key))+" "+openSessionActionVerb(kind))
@@ -4881,6 +4606,24 @@ func valueOrDash(value string) string {
 	return value
 }
 
+func (a *App) pageScrollDelta() float32 {
+	if a.rootScroll == nil {
+		return 520
+	}
+	height := a.rootScroll.Size().Height
+	if height <= 0 {
+		height = a.window.Canvas().Size().Height
+	}
+	if height <= 0 {
+		return 520
+	}
+	delta := height * 0.82
+	if delta < 240 {
+		return 240
+	}
+	return delta
+}
+
 func (a *App) toggleTheme() {
 	a.darkMode = !a.darkMode
 	a.applyTheme()
@@ -4936,9 +4679,12 @@ func (a *App) showHelpDialog() {
 		"T  Toggle theme",
 		"V  Toggle local server",
 		"J/K  Scroll",
+		"Up/Down  Scroll",
+		"Left/Right  Page up/down",
 		"A  Acknowledge notification",
 		"C  Continue current session",
 		"Hold open-session letter 1s  Continue / Close / Jump",
+		"Hold voice letter, then release  Record speech and edit before send",
 		"Esc  Close popup/dialog",
 	}, "\n"))
 	content.Wrapping = fyne.TextWrapWord
@@ -5061,14 +4807,14 @@ func themeToggleLabel(darkMode bool) string {
 
 func appBackground(darkMode bool) color.NRGBA {
 	if darkMode {
-		return color.NRGBA{R: 0x1B, G: 0x1E, B: 0x23, A: 0xFF}
+		return color.NRGBA{R: 0x12, G: 0x12, B: 0x12, A: 0xFF}
 	}
 	return color.NRGBA{R: 0xF6, G: 0xF3, B: 0xEC, A: 0xFF}
 }
 
 func cardFill(darkMode bool) color.NRGBA {
 	if darkMode {
-		return color.NRGBA{R: 0x28, G: 0x2D, B: 0x34, A: 0xFF}
+		return color.NRGBA{R: 0x1E, G: 0x1E, B: 0x1E, A: 0xFF}
 	}
 	return color.NRGBA{R: 0xFF, G: 0xFD, B: 0xF8, A: 0xFF}
 }
@@ -5081,7 +4827,7 @@ func cardBorder(darkMode bool, highlight bool) color.NRGBA {
 		return color.NRGBA{R: 0xC9, G: 0x74, B: 0x11, A: 0xFF}
 	}
 	if darkMode {
-		return color.NRGBA{R: 0x6A, G: 0x73, B: 0x80, A: 0xFF}
+		return color.NRGBA{R: 0x4A, G: 0x4A, B: 0x4A, A: 0xFF}
 	}
 	return color.NRGBA{R: 0xD2, G: 0xC7, B: 0xB5, A: 0xFF}
 }

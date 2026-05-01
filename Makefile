@@ -16,10 +16,6 @@ install:
 install-uconsole:
 	./uconsole/scripts/build-install.sh
 
-.PHONY: install-uconsole-ws281x
-install-uconsole-ws281x:
-	./uconsole/scripts/build-install.sh --ws281x
-
 .PHONY: run
 run:
 	go run ./cmd/codex-buddy serve --config $(APP_DIR)/webserver/examples/config.example.json

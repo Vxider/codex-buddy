@@ -120,15 +120,26 @@ func (c *Client) ContinueNotification(ctx context.Context, item NotificationResp
 
 func (c *Client) ContinueSession(ctx context.Context, session SessionResponse) error {
 	action := session.ContinueAction
-	return c.executeSessionAction(ctx, session, action, "session continue")
+	return c.executeSessionAction(ctx, session, action, "session continue", "")
+}
+
+func (c *Client) SendSessionText(ctx context.Context, session SessionResponse, text string) error {
+	action := session.ContinueAction
+	if action == nil && strings.TrimSpace(session.SessionID) != "" {
+		action = &SessionActionPayload{
+			Method:   http.MethodPost,
+			Endpoint: "/v1/sessions/" + session.SessionID + "/continue",
+		}
+	}
+	return c.executeSessionAction(ctx, session, action, "session text", text)
 }
 
 func (c *Client) CloseSession(ctx context.Context, session SessionResponse) error {
 	action := session.CloseAction
-	return c.executeSessionAction(ctx, session, action, "session close")
+	return c.executeSessionAction(ctx, session, action, "session close", "")
 }
 
-func (c *Client) executeSessionAction(ctx context.Context, session SessionResponse, action *SessionActionPayload, actionName string) error {
+func (c *Client) executeSessionAction(ctx context.Context, session SessionResponse, action *SessionActionPayload, actionName string, text string) error {
 	if action == nil {
 		return fmt.Errorf("%s is unavailable", actionName)
 	}
@@ -149,6 +160,7 @@ func (c *Client) executeSessionAction(ctx context.Context, session SessionRespon
 
 	payload, err := json.Marshal(map[string]string{
 		"action_token": strings.TrimSpace(action.ActionToken),
+		"text":         strings.TrimSpace(text),
 	})
 	if err != nil {
 		return err

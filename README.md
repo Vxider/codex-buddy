@@ -15,8 +15,8 @@
 The repository currently contains three tracks:
 
 - Server: passively monitors locally running Codex CLI sessions without creating threads or sending turns
-- uConsole client: native GUI with optional WS2812 LED output for aggregate state, attention/error reminders, and one-shot `continue + Enter` actions during `attention`
-- iPhone / Apple Watch companion: SwiftUI sources and an XcodeGen project spec for a Tailscale-only mobile client
+- uConsole client: native GUI for aggregate state, attention/error reminders, and one-shot `continue + Enter` actions during `attention`
+- iPhone / Apple Watch companion: SwiftUI sources and an XcodeGen project spec for a mobile client
 
 ## Capabilities
 
@@ -34,7 +34,7 @@ The repository currently contains three tracks:
   - Asks the local daemon to shut down cleanly, with `systemd --user` fallback when available
 - `codex-buddy-uconsole`
   - Starts the native uConsole companion GUI
-  - Connects to a local or remote `codex-buddy` server over HTTP/SSE and supports attention/error cards, acknowledge, continue, and LED state rendering
+  - Connects to a local or remote `codex-buddy` server over HTTP/SSE and supports attention/error cards, acknowledge, continue, and voice follow-up input
 - `codex-buddy uconsole`
   - Compatibility entrypoint for the same GUI app
 
@@ -54,12 +54,6 @@ uConsole GUI:
 ./uconsole/scripts/build-install.sh
 ```
 
-uConsole GUI with WS2812 hardware support:
-
-```bash
-./uconsole/scripts/build-install.sh --ws281x
-```
-
 Notes:
 
 - `webserver/scripts/build-install.sh`
@@ -68,7 +62,6 @@ Notes:
   - Restarts `codex-buddy.service` automatically when the service is already installed
 - `uconsole/scripts/build-install.sh`
   - Builds the GUI-enabled uConsole variant with the `uconsole_gui` tag
-  - Accepts `--ws281x` for real hardware LED output
   - Installs to `~/.local/bin/codex-buddy-uconsole` by default
 
 Manual builds are also supported.
@@ -86,17 +79,9 @@ Native uConsole GUI build:
 go build -tags uconsole_gui -o ~/.local/bin/codex-buddy-uconsole ./cmd/codex-buddy-uconsole
 ```
 
-Native uConsole GUI build with Raspberry Pi WS2812 output:
-
-```bash
-go build -tags 'uconsole_gui ws281x' -o ~/.local/bin/codex-buddy-uconsole ./cmd/codex-buddy-uconsole
-```
-
 Notes:
 
 - `uconsole_gui` isolates Fyne desktop dependencies so server-only builds and tests stay lightweight
-- `ws281x` enables the `rpi-ws281x-go` hardware driver; without it the code falls back to a no-op LED driver
-- On Raspberry Pi / uConsole hardware, `libws2811` and related system dependencies must be installed before enabling `ws281x`
 
 ## Setup
 
@@ -141,12 +126,6 @@ Connect to a remote `codex-buddy` server:
 codex-buddy-uconsole --server-url http://<codex-host>:8787
 ```
 
-Disable LEDs for local debugging:
-
-```bash
-codex-buddy-uconsole --no-led
-```
-
 `codex-buddy uconsole` remains available as a compatibility command. If the current binary does not include the GUI, the command will tell you to rebuild with `-tags uconsole_gui`.
 
 ## Configuration
@@ -168,14 +147,6 @@ The `uconsole` config block currently includes:
 - `window.width`
 - `window.height`
 - `window.fullscreen`
-- `led.enabled`
-- `led.pixels`
-- `led.brightness`
-- `led.gpio_pin`
-- `led.dma_num`
-- `led.frequency`
-
-The recommended default LED setup for a CM5-based uConsole 4G blank board is `GPIO45 / pin 52 + 8 x WS2812`.
 
 ## Documentation
 
@@ -183,5 +154,3 @@ The recommended default LED setup for a CM5-based uConsole 4G blank board is `GP
 - [webserver/docs/architecture.md](/home/vxider/WorkSpace/codex-buddy/webserver/docs/architecture.md)
 - [webserver/docs/software-plan.md](/home/vxider/WorkSpace/codex-buddy/webserver/docs/software-plan.md)
 - [uconsole/docs/hardware.md](/home/vxider/WorkSpace/codex-buddy/uconsole/docs/hardware.md)
-- [uconsole/docs/light-state-machine-interface.md](/home/vxider/WorkSpace/codex-buddy/uconsole/docs/light-state-machine-interface.md)
-- [uconsole/docs/archive/zh-CN/README.md](/home/vxider/WorkSpace/codex-buddy/uconsole/docs/archive/zh-CN/README.md)

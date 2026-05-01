@@ -394,7 +394,7 @@ func (s *Server) publicStatus(snapshot model.StatusSnapshot) publicStatus {
 
 	return publicStatus{
 		ServerTime:         snapshot.ServerTime,
-		OverallState:       snapshot.OverallState,
+		OverallState:       publicCodexState(snapshot.OverallState),
 		OverallStateDetail: snapshot.OverallStateDetail,
 		SessionsCount:      len(snapshot.Sessions),
 		Sessions:           s.publicSessions(snapshot.Sessions, notifications, titles),
@@ -423,7 +423,7 @@ func (s *Server) publicSession(session model.SessionSnapshot, notification model
 		DisplayTitle:    titles.Display,
 		CompactTitle:    titles.Compact,
 		MicroTitle:      titles.Micro,
-		State:           session.State,
+		State:           publicCodexState(session.State),
 		StateDetail:     session.StateDetail,
 		UpdatedAt:       session.UpdatedAt,
 		Summary:         fullSummary,
@@ -437,6 +437,13 @@ func (s *Server) publicSession(session model.SessionSnapshot, notification model
 		TmuxSession:     strings.TrimSpace(session.TmuxSession),
 		TmuxWindow:      strings.TrimSpace(session.TmuxWindow),
 		TmuxPane:        strings.TrimSpace(session.TmuxPane),
+	}
+
+	if item.State == model.StateOpen && openText != "" {
+		item.OpenSummary = openText
+		item.OpenMarkdown, item.OpenHTML = renderRichText(openText)
+		item.CompactOpen = compactSummary(openText, true)
+		item.MicroOpen = microSummary(openText, true)
 	}
 
 	if notification.ID != "" {
@@ -457,6 +464,14 @@ func (s *Server) publicSession(session model.SessionSnapshot, notification model
 			}
 		}
 	}
+	if !item.CanContinue && item.State == model.StateOpen && strings.TrimSpace(session.SessionID) != "" {
+		item.CanContinue = true
+		item.ContinueAction = &publicSessionAction{
+			Method:   http.MethodPost,
+			Endpoint: "/v1/sessions/" + session.SessionID + "/continue",
+			Label:    "Continue",
+		}
+	}
 	if closer, ok := s.control.(control.SessionCloser); ok && closer != nil && item.TmuxPane != "" {
 		item.CanClose = true
 		item.CloseAction = &publicSessionAction{
@@ -467,6 +482,15 @@ func (s *Server) publicSession(session model.SessionSnapshot, notification model
 	}
 
 	return item
+}
+
+func publicCodexState(state model.State) model.State {
+	switch state {
+	case model.StateRun, model.StateRunning, model.StateRunningBash:
+		return model.StateRun
+	default:
+		return model.StateOpen
+	}
 }
 
 func (s *Server) publicNotifications(items []model.NotificationSnapshot) []publicNotification {
@@ -507,14 +531,28 @@ func (s *Server) handleSessionContinue(w http.ResponseWriter, r *http.Request, s
 
 	var req struct {
 		ActionToken string `json:"action_token"`
+		Text        string `json:"text,omitempty"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, "invalid json body", http.StatusBadRequest)
 		return
 	}
 	req.ActionToken = strings.TrimSpace(req.ActionToken)
+	commandText := strings.TrimSpace(req.Text)
 	if req.ActionToken == "" {
-		http.Error(w, "missing action_token", http.StatusBadRequest)
+		if commandText == "" {
+			commandText = model.ContinueCommandText
+		}
+		session, ok := s.store.Session(sessionID)
+		if !ok || strings.TrimSpace(session.TmuxPane) == "" {
+			http.Error(w, "session is no longer actionable", http.StatusConflict)
+			return
+		}
+		if err := s.control.Continue(session, commandText); err != nil {
+			http.Error(w, fmt.Sprintf("continue failed: %v", err), http.StatusBadGateway)
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 		return
 	}
 
@@ -523,7 +561,10 @@ func (s *Server) handleSessionContinue(w http.ResponseWriter, r *http.Request, s
 		http.Error(w, "session is no longer actionable", http.StatusConflict)
 		return
 	}
-	if err := s.control.Continue(session, model.ContinueCommandText); err != nil {
+	if commandText == "" {
+		commandText = model.ContinueCommandText
+	}
+	if err := s.control.Continue(session, commandText); err != nil {
 		http.Error(w, fmt.Sprintf("continue failed: %v", err), http.StatusBadGateway)
 		return
 	}
@@ -1142,20 +1183,17 @@ var debugPageHTML = `<!doctype html>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>codex-buddy status</title>
   <style>
-    body { font-family: ui-sans-serif, system-ui, sans-serif; margin: 24px; background: #0b1020; color: #edf2f7; }
+    body { font-family: ui-sans-serif, system-ui, sans-serif; margin: 24px; background: #121212; color: #edf2f7; }
     .wrap { max-width: 760px; margin: 0 auto; }
-    .card { background: #11182d; border: 1px solid #22304f; border-radius: 14px; padding: 16px; }
+    .card { background: #1e1e1e; border: 1px solid #3a3a3a; border-radius: 14px; padding: 16px; }
     h1, h2 { margin-top: 0; }
-    .status { display: inline-block; padding: 6px 12px; border-radius: 999px; background: #1e293b; border: 1px solid #334155; text-transform: lowercase; }
-    .status-offline { background: #111827; border-color: #374151; }
-    .status-idle { background: #0f172a; border-color: #334155; }
-    .status-running { background: #172554; border-color: #2563eb; }
+    .status { display: inline-block; padding: 6px 12px; border-radius: 999px; background: #1e293b; border: 1px solid #334155; }
+    .status-run { background: #172554; border-color: #2563eb; }
     .status-open { background: #3f2b02; border-color: #f59e0b; }
-    .status-error { background: #3b0a0a; border-color: #ef4444; }
     .muted { color: #94a3b8; font-size: 12px; }
     .summary { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
     .sessions { display: grid; gap: 10px; margin-top: 16px; }
-    .session { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; background: #0a1124; border: 1px solid #22304f; border-radius: 10px; padding: 12px; }
+    .session { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; background: #1a1a1a; border: 1px solid #3a3a3a; border-radius: 10px; padding: 12px; }
     .session-main { min-width: 0; }
     .session-name { font-weight: 600; word-break: break-word; }
     .session-meta { margin-top: 4px; }
@@ -1166,7 +1204,7 @@ var debugPageHTML = `<!doctype html>
     .session-summary ul, .session-summary ol { margin: 0 0 10px 20px; padding: 0; }
     .session-summary li { margin: 4px 0; }
     .session-summary a { color: inherit; text-decoration: none; pointer-events: none; cursor: text; }
-    .session-summary code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; padding: 1px 5px; border-radius: 6px; background: #162033; color: #e2e8f0; }
+    .session-summary code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; padding: 1px 5px; border-radius: 6px; background: #2b2b2b; color: #e2e8f0; }
     .session-summary pre { margin: 8px 0 10px; padding: 12px 14px; overflow: auto; color: #dbe6ff; white-space: pre-wrap; }
     .session-summary pre code { padding: 0; border-radius: 0; background: transparent; color: inherit; }
     .session-summary .terminal-output { background: transparent; }
@@ -1179,7 +1217,7 @@ var debugPageHTML = `<!doctype html>
       <div class="summary">
         <div>
           <div class="muted">aggregate status</div>
-          <div style="margin-top:8px;"><span class="status status-offline" id="overall">offline</span></div>
+          <div style="margin-top:8px;"><span class="status status-open" id="overall">OPEN</span></div>
         </div>
         <div style="text-align:right;">
           <div class="muted" id="serverTime">server_time: -</div>
@@ -1191,7 +1229,6 @@ var debugPageHTML = `<!doctype html>
   </div>
   <script>
     let source;
-    const states = ['offline', 'idle', 'running', 'open', 'error'];
     function escapeHTML(value) {
       return String(value || '')
         .replaceAll('&', '&amp;')
@@ -1211,14 +1248,16 @@ var debugPageHTML = `<!doctype html>
     }
     function normalizeState(value) {
       const state = String(value || '').toLowerCase();
-      if (state === 'running_bash') return 'running';
-      if (state === 'attention') return 'open';
-      return states.includes(state) ? state : 'offline';
+      if (state === 'run' || state === 'running' || state === 'running_bash') return 'run';
+      return 'open';
+    }
+    function stateLabel(state) {
+      return normalizeState(state) === 'open' ? 'OPEN' : 'RUN';
     }
     function renderStateChip(el, state) {
       const normalized = normalizeState(state);
       el.className = 'status status-' + normalized;
-      el.textContent = normalized === 'running' ? 'RUN' : normalized;
+      el.textContent = stateLabel(normalized);
     }
     async function loadOnce() {
       const resp = await fetch('/v1/status');
@@ -1231,7 +1270,7 @@ var debugPageHTML = `<!doctype html>
       const sessions = document.getElementById('sessions');
       sessions.innerHTML = '';
       if (!Array.isArray(snapshot.sessions) || snapshot.sessions.length === 0) {
-        sessions.innerHTML = '<div class="session"><div class="session-main"><div class="session-name muted">No active sessions</div></div><span class="status status-offline">offline</span></div>';
+        sessions.innerHTML = '<div class="session"><div class="session-main"><div class="session-name muted">No active sessions</div></div><span class="status status-open">OPEN</span></div>';
         return;
       }
       snapshot.sessions.forEach((session) => {
@@ -1251,7 +1290,7 @@ var debugPageHTML = `<!doctype html>
           '  <div class="muted session-meta">' + escapeHTML(meta.join(' · ')) + '</div>',
           detailHTML ? ('  <div class="session-summary">' + detailHTML + '</div>') : (detail ? ('  <div class="session-summary">' + escapeHTML(detail) + '</div>') : ''),
           '</div>',
-          '<span class="status status-' + normalizeState(session.state) + '">' + normalizeState(session.state) + '</span>'
+          '<span class="status status-' + normalizeState(session.state) + '">' + stateLabel(session.state) + '</span>'
         ].join('');
         sessions.appendChild(el);
       });
@@ -1281,9 +1320,9 @@ var codexDisabledPageHTML = `<!doctype html>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>codex-buddy passive mode</title>
   <style>
-    body { font-family: ui-sans-serif, system-ui, sans-serif; margin: 24px; background: #0b1020; color: #edf2f7; }
+    body { font-family: ui-sans-serif, system-ui, sans-serif; margin: 24px; background: #121212; color: #edf2f7; }
     .wrap { max-width: 720px; margin: 0 auto; }
-    .card { background: #11182d; border: 1px solid #22304f; border-radius: 14px; padding: 16px; }
+    .card { background: #1e1e1e; border: 1px solid #3a3a3a; border-radius: 14px; padding: 16px; }
     .muted { color: #94a3b8; font-size: 12px; }
     a { color: #8fb4ff; }
   </style>

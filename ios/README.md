@@ -5,7 +5,7 @@ This directory contains the first public-source version of the iPhone and Apple 
 ## Layout
 
 - `AppCore/`: shared models, JSON decoding, snapshot storage, deep links, and the HTTP client for `/v1/status` and `/v1/sessions/{id}/continue`
-- `PhoneApp/`: the iPhone app that talks directly to the `codex-buddy` webserver over Tailscale
+- `PhoneApp/`: the iPhone app that talks directly to the `codex-buddy` webserver
 - `WatchApp/`: the watchOS foreground app that refreshes through `WatchConnectivity` and proxies `continue` through the iPhone app
 - `WatchWidget/`: the accessory circular watch widget that renders the cached aggregate state
 - `project.yml`: XcodeGen specification for the iPhone app, watch app, and widget extension

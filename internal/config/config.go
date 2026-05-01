@@ -75,22 +75,12 @@ type UConsoleConfig struct {
 	PollFallbackMS   int                  `json:"poll_fallback_ms"`
 	ContinueHoldMS   int                  `json:"continue_hold_ms"`
 	Window           UConsoleWindowConfig `json:"window"`
-	LED              UConsoleLEDConfig    `json:"led"`
 }
 
 type UConsoleWindowConfig struct {
 	Width      int  `json:"width"`
 	Height     int  `json:"height"`
 	Fullscreen bool `json:"fullscreen"`
-}
-
-type UConsoleLEDConfig struct {
-	Enabled    bool `json:"enabled"`
-	Pixels     int  `json:"pixels"`
-	Brightness int  `json:"brightness"`
-	GPIOPin    int  `json:"gpio_pin"`
-	DmaNum     int  `json:"dma_num"`
-	Frequency  int  `json:"frequency"`
 }
 
 func Load(path string) (Config, error) {
@@ -197,14 +187,6 @@ func Default() Config {
 				Height:     540,
 				Fullscreen: false,
 			},
-			LED: UConsoleLEDConfig{
-				Enabled:    true,
-				Pixels:     8,
-				Brightness: 40,
-				GPIOPin:    45,
-				DmaNum:     10,
-				Frequency:  800000,
-			},
 		},
 	}
 }
@@ -257,21 +239,6 @@ func applyDefaults(cfg *Config) {
 	}
 	if cfg.UConsole.Window.Height <= 0 {
 		cfg.UConsole.Window.Height = 540
-	}
-	if cfg.UConsole.LED.Pixels <= 0 {
-		cfg.UConsole.LED.Pixels = 8
-	}
-	if cfg.UConsole.LED.Brightness <= 0 {
-		cfg.UConsole.LED.Brightness = 40
-	}
-	if cfg.UConsole.LED.GPIOPin <= 0 {
-		cfg.UConsole.LED.GPIOPin = 45
-	}
-	if cfg.UConsole.LED.DmaNum <= 0 {
-		cfg.UConsole.LED.DmaNum = 10
-	}
-	if cfg.UConsole.LED.Frequency <= 0 {
-		cfg.UConsole.LED.Frequency = 800000
 	}
 }
 
