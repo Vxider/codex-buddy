@@ -4,13 +4,17 @@ package uconsole
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"hash/fnv"
 	stdhtml "html"
 	"image/color"
 	"log"
 	"math/rand"
+	"net/url"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
@@ -94,6 +98,8 @@ type App struct {
 	settingsList           *fyne.Container
 	openShortcutByAction   map[string]fyne.KeyName
 	openActionByShortcut   map[fyne.KeyName]string
+	openShortcutSessionKey string
+	visibleOpenSessionKeys []string
 	openActionPending      map[string]bool
 	openHoldStop           chan struct{}
 	openHoldKey            fyne.KeyName
@@ -154,11 +160,12 @@ type badgeButtonRenderer struct {
 }
 
 type sessionListState struct {
-	shortcuts     map[string]fyne.KeyName
-	pending       map[string]bool
-	holdActionKey string
-	holdProgress  float64
-	holdLabel     string
+	shortcuts          map[string]fyne.KeyName
+	pending            map[string]bool
+	shortcutSessionKey string
+	holdActionKey      string
+	holdProgress       float64
+	holdLabel          string
 }
 
 type openSessionActionKind string
@@ -170,6 +177,31 @@ const (
 	openSessionActionJump     openSessionActionKind = "jump"
 )
 
+var openSessionActionKinds = []openSessionActionKind{
+	openSessionActionContinue,
+	openSessionActionVoice,
+	openSessionActionClose,
+	openSessionActionJump,
+}
+
+var openShortcutPool = []fyne.KeyName{
+	fyne.KeyB,
+	fyne.KeyD,
+	fyne.KeyF,
+	fyne.KeyG,
+	fyne.KeyH,
+	fyne.KeyI,
+	fyne.KeyL,
+	fyne.KeyM,
+	fyne.KeyO,
+	fyne.KeyP,
+	fyne.KeyQ,
+	fyne.KeyU,
+	fyne.KeyW,
+	fyne.KeyY,
+	fyne.KeyZ,
+}
+
 type sessionGridLayout struct {
 	minColumnWidth float32
 	gap            float32
@@ -178,6 +210,7 @@ type sessionGridLayout struct {
 type stickySessionRow struct {
 	session      SessionResponse
 	root         *fyne.Container
+	cardBG       *canvas.Rectangle
 	headerBG     *canvas.Rectangle
 	header       fyne.CanvasObject
 	body         fyne.CanvasObject
@@ -186,6 +219,7 @@ type stickySessionRow struct {
 	bottomInset  float32
 	stickyOffset float32
 	stickyActive bool
+	highlighted  bool
 }
 
 type stickySessionRowLayout struct {
@@ -211,24 +245,6 @@ type markdownParagraphFragment struct {
 	HasColor bool
 	X        float32
 	Y        float32
-}
-
-var openShortcutPool = []fyne.KeyName{
-	fyne.KeyB,
-	fyne.KeyD,
-	fyne.KeyF,
-	fyne.KeyG,
-	fyne.KeyH,
-	fyne.KeyI,
-	fyne.KeyL,
-	fyne.KeyM,
-	fyne.KeyO,
-	fyne.KeyP,
-	fyne.KeyQ,
-	fyne.KeyU,
-	fyne.KeyW,
-	fyne.KeyY,
-	fyne.KeyZ,
 }
 
 func (t textSizeTheme) Size(name fyne.ThemeSizeName) float32 {
@@ -358,6 +374,9 @@ func (l stickySessionRowLayout) Layout(_ []fyne.CanvasObject, size fyne.Size) {
 	}
 
 	row := l.row
+	row.cardBG.Move(fyne.NewPos(0, 0))
+	row.cardBG.Resize(size)
+
 	headerSize := row.header.MinSize()
 	headerY := row.topInset
 	if row.stickyActive {
@@ -1569,7 +1588,7 @@ func (a *App) refreshNow(ctx context.Context, force bool) error {
 
 	var err error
 	if errSummary != "" {
-		err = fmt.Errorf(errSummary)
+		err = errors.New(errSummary)
 	}
 	a.applyState(status, notifications, snapshots, connected, err)
 	return err
@@ -1896,8 +1915,8 @@ func (a *App) render() {
 	darkMode := a.effectiveDarkMode()
 	a.stateMu.RUnlock()
 
-	badgeText, badgeColor := badgeStyle(status.OverallState)
-	a.badgeLabel.Text = strings.ToUpper(badgeText)
+	badgeText, badgeColor := badgeStyle(status.OverallState, status.OverallStateDetail)
+	a.badgeLabel.Text = badgeText
 	a.badgeLabel.Color = color.White
 	a.badgeLabel.Refresh()
 	a.badgeFill.FillColor = badgeColor
@@ -1947,15 +1966,21 @@ func (a *App) currentOpenSessionListState() sessionListState {
 	a.stateMu.RLock()
 	defer a.stateMu.RUnlock()
 	return sessionListState{
-		shortcuts:     cloneShortcutMap(a.openShortcutByAction),
-		pending:       clonePendingMap(a.openActionPending),
-		holdActionKey: a.openHoldActionKey,
-		holdProgress:  a.openHoldProgress,
-		holdLabel:     holdDurationLabel(a.openShortcutHoldDuration()),
+		shortcuts:          cloneShortcutMap(a.openShortcutByAction),
+		pending:            clonePendingMap(a.openActionPending),
+		shortcutSessionKey: a.openShortcutSessionKey,
+		holdActionKey:      a.openHoldActionKey,
+		holdProgress:       a.openHoldProgress,
+		holdLabel:          holdDurationLabel(a.openShortcutHoldDuration()),
 	}
 }
 
 func (a *App) renderSessionList(openSessions, otherSessions []SessionResponse, darkMode bool) {
+	if len(openSessions) > 0 {
+		a.ensureOpenShortcutSession(openSessions)
+	} else {
+		a.setOpenShortcutSession("")
+	}
 	view := a.currentOpenSessionListState()
 
 	if a.openSessionSection != nil && a.openSessionList != nil {
@@ -1983,9 +2008,13 @@ func (a *App) renderSessionList(openSessions, otherSessions []SessionResponse, d
 
 func (a *App) refreshOpenSessionStickyRows() {
 	if a.rootScroll == nil || a.openSessionStickyLayer == nil || len(a.openStickyRows) == 0 {
+		a.setVisibleOpenSessions(nil)
+		a.setOpenShortcutSession("")
 		return
 	}
 	if a.rootScroll.Content == nil || a.rootScroll.Offset.Y <= 0 {
+		a.setVisibleOpenSessions(a.visibleOpenSessionKeysFromRows(a.openStickyRows))
+		a.ensureOpenShortcutSessionForRows(a.openStickyRows)
 		a.openSessionStickyLayer.Objects = nil
 		a.openSessionStickyLayer.Hide()
 		a.openSessionStickyLayer.Refresh()
@@ -1995,7 +2024,11 @@ func (a *App) refreshOpenSessionStickyRows() {
 	driver := fyne.CurrentApp().Driver()
 	contentTop := driver.AbsolutePositionForObject(a.rootScroll.Content).Y
 	viewportOffsetTop := a.rootScroll.Offset.Y
+	viewportBottom := viewportOffsetTop + a.rootScroll.Size().Height
 	var active *stickySessionRow
+	var focused *stickySessionRow
+	visibleKeys := make([]string, 0, len(a.openStickyRows))
+	focusY := viewportOffsetTop + 1
 
 	for _, row := range a.openStickyRows {
 		if row == nil || row.root == nil {
@@ -2005,8 +2038,17 @@ func (a *App) refreshOpenSessionStickyRows() {
 		rowTop := driver.AbsolutePositionForObject(row.root).Y - contentTop
 		rowBottom := rowTop + row.root.Size().Height
 		headerTop := rowTop + row.topInset
+		if row.root.Size().Height <= 0 {
+			continue
+		}
 
 		row.setStickyState(false, 0)
+		if rowBottom > viewportOffsetTop && rowTop < viewportBottom {
+			visibleKeys = append(visibleKeys, sessionActionKey(row.session))
+		}
+		if focused == nil && rowBottom > focusY {
+			focused = row
+		}
 		if active != nil {
 			continue
 		}
@@ -2016,12 +2058,20 @@ func (a *App) refreshOpenSessionStickyRows() {
 	}
 
 	if active == nil {
+		a.setVisibleOpenSessions(visibleKeys)
+		if focused != nil {
+			a.setOpenShortcutSession(sessionActionKey(focused.session))
+		} else {
+			a.ensureOpenShortcutSessionForRows(a.openStickyRows)
+		}
 		a.openSessionStickyLayer.Objects = nil
 		a.openSessionStickyLayer.Hide()
 		a.openSessionStickyLayer.Refresh()
 		return
 	}
 
+	a.setVisibleOpenSessions(visibleKeys)
+	a.setOpenShortcutSession(sessionActionKey(active.session))
 	view := a.currentOpenSessionListState()
 	darkMode := a.effectiveDarkMode()
 	header := a.buildOpenSessionHeader(active.session, darkMode, view)
@@ -2868,12 +2918,14 @@ func (a *App) syncOpenSessionShortcutsLocked(sessions []SessionResponse) {
 	activeActions := make(map[string]bool)
 	nextByAction := make(map[string]fyne.KeyName)
 	usedKeys := make(map[fyne.KeyName]bool)
+	orderedSessions := a.prioritizedOpenShortcutSessionsLocked(sessions)
 
-	for _, session := range sessions {
-		if !isOpenSession(session) {
-			continue
-		}
-		for _, actionKey := range openSessionActionKeys(session) {
+	for _, session := range orderedSessions {
+		for _, kind := range openSessionActionKinds {
+			if !isOpenSessionActionAvailable(session, kind) {
+				continue
+			}
+			actionKey := openSessionActionKey(session, kind)
 			activeActions[actionKey] = true
 			if a.openActionPending[actionKey] {
 				continue
@@ -2886,11 +2938,9 @@ func (a *App) syncOpenSessionShortcutsLocked(sessions []SessionResponse) {
 	}
 
 	available := shuffledShortcutKeys(a.shortcutRand, usedKeys)
-	for _, session := range sessions {
-		if !isOpenSession(session) {
-			continue
-		}
+	for _, session := range orderedSessions {
 		for _, actionKey := range openSessionActionKeys(session) {
+			activeActions[actionKey] = true
 			if a.openActionPending[actionKey] {
 				continue
 			}
@@ -2900,9 +2950,10 @@ func (a *App) syncOpenSessionShortcutsLocked(sessions []SessionResponse) {
 			if len(available) == 0 {
 				break
 			}
-			nextByAction[actionKey] = available[0]
-			usedKeys[available[0]] = true
+			key := available[0]
 			available = available[1:]
+			nextByAction[actionKey] = key
+			usedKeys[key] = true
 		}
 	}
 
@@ -2934,6 +2985,38 @@ func (a *App) syncOpenSessionShortcutsLocked(sessions []SessionResponse) {
 	a.openActionByShortcut = nextByShortcut
 }
 
+func (a *App) prioritizedOpenShortcutSessionsLocked(sessions []SessionResponse) []SessionResponse {
+	openSessions := make([]SessionResponse, 0, len(sessions))
+	byKey := make(map[string]SessionResponse, len(sessions))
+	for _, session := range sessions {
+		if !isOpenSession(session) {
+			continue
+		}
+		openSessions = append(openSessions, session)
+		byKey[sessionActionKey(session)] = session
+	}
+	if len(openSessions) < 2 || len(a.visibleOpenSessionKeys) == 0 {
+		return openSessions
+	}
+
+	ordered := make([]SessionResponse, 0, len(openSessions))
+	seen := make(map[string]bool, len(openSessions))
+	for _, key := range a.visibleOpenSessionKeys {
+		if session, ok := byKey[key]; ok {
+			ordered = append(ordered, session)
+			seen[key] = true
+		}
+	}
+	for _, session := range openSessions {
+		key := sessionActionKey(session)
+		if seen[key] {
+			continue
+		}
+		ordered = append(ordered, session)
+	}
+	return ordered
+}
+
 func shuffledShortcutKeys(rng *rand.Rand, used map[fyne.KeyName]bool) []fyne.KeyName {
 	keys := make([]fyne.KeyName, 0, len(openShortcutPool))
 	for _, key := range openShortcutPool {
@@ -2942,13 +3025,108 @@ func shuffledShortcutKeys(rng *rand.Rand, used map[fyne.KeyName]bool) []fyne.Key
 		}
 		keys = append(keys, key)
 	}
-	if rng == nil {
-		return keys
+	if rng != nil {
+		rng.Shuffle(len(keys), func(i, j int) {
+			keys[i], keys[j] = keys[j], keys[i]
+		})
 	}
-	rng.Shuffle(len(keys), func(i, j int) {
-		keys[i], keys[j] = keys[j], keys[i]
-	})
 	return keys
+}
+
+func (a *App) setOpenShortcutSession(sessionKey string) {
+	a.stateMu.Lock()
+	sessionKey = strings.TrimSpace(sessionKey)
+	if a.openShortcutSessionKey == sessionKey {
+		a.stateMu.Unlock()
+		return
+	}
+	a.openShortcutSessionKey = sessionKey
+	a.syncOpenSessionShortcutsLocked(a.lastStatus.Sessions)
+	a.stateMu.Unlock()
+	a.applyOpenShortcutSessionVisuals(sessionKey)
+}
+
+func (a *App) ensureOpenShortcutSession(sessions []SessionResponse) {
+	if len(sessions) == 0 {
+		a.setOpenShortcutSession("")
+		return
+	}
+
+	a.stateMu.Lock()
+	defer a.stateMu.Unlock()
+	current := a.openShortcutSessionKey
+	for _, session := range sessions {
+		if sessionActionKey(session) == current {
+			return
+		}
+	}
+	a.openShortcutSessionKey = sessionActionKey(sessions[0])
+	a.syncOpenSessionShortcutsLocked(a.lastStatus.Sessions)
+}
+
+func (a *App) setVisibleOpenSessions(keys []string) {
+	a.stateMu.Lock()
+	if sameStringSlice(a.visibleOpenSessionKeys, keys) {
+		a.stateMu.Unlock()
+		return
+	}
+	a.visibleOpenSessionKeys = append([]string(nil), keys...)
+	a.syncOpenSessionShortcutsLocked(a.lastStatus.Sessions)
+	sessionKey := a.openShortcutSessionKey
+	a.stateMu.Unlock()
+	a.applyOpenShortcutSessionVisuals(sessionKey)
+}
+
+func (a *App) visibleOpenSessionKeysFromRows(rows []*stickySessionRow) []string {
+	keys := make([]string, 0, len(rows))
+	for _, row := range rows {
+		if row == nil {
+			continue
+		}
+		keys = append(keys, sessionActionKey(row.session))
+	}
+	return keys
+}
+
+func (a *App) ensureOpenShortcutSessionForRows(rows []*stickySessionRow) {
+	if len(rows) == 0 {
+		a.setOpenShortcutSession("")
+		return
+	}
+	a.stateMu.RLock()
+	current := a.openShortcutSessionKey
+	a.stateMu.RUnlock()
+	for _, row := range rows {
+		if row != nil && sessionActionKey(row.session) == current {
+			return
+		}
+	}
+	for _, row := range rows {
+		if row != nil {
+			a.setOpenShortcutSession(sessionActionKey(row.session))
+			return
+		}
+	}
+}
+
+func (a *App) applyOpenShortcutSessionVisuals(sessionKey string) {
+	darkMode := a.effectiveDarkMode()
+	view := a.currentOpenSessionListState()
+	for _, row := range a.openStickyRows {
+		if row == nil {
+			continue
+		}
+		highlighted := sessionActionKey(row.session) == sessionKey
+		row.setHighlight(highlighted, darkMode)
+		row.setHeader(a.buildOpenSessionHeader(row.session, darkMode, view))
+		if row.stickyActive {
+			row.headerBG.FillColor = cardFill(darkMode)
+			row.headerBG.Refresh()
+		}
+		if row.root != nil {
+			row.root.Refresh()
+		}
+	}
 }
 
 func sanitizeServers(servers []BuddyServer) []BuddyServer {
@@ -2987,70 +3165,66 @@ func offlineStatus() StatusResponse {
 	}
 }
 
-func badgeStyle(state model.State) (string, color.NRGBA) {
-	state = normalizeCompatState(state)
-	switch state {
-	case model.StateIdle:
-		return "idle", color.NRGBA{R: 0x58, G: 0x72, B: 0x58, A: 0xFF}
-	case model.StateRun, model.StateRunning, model.StateRunningBash:
-		return "RUN", color.NRGBA{R: 0x19, G: 0x5F, B: 0x92, A: 0xFF}
-	case model.StateAttention:
-		return "open", color.NRGBA{R: 0xBC, G: 0x7A, B: 0x00, A: 0xFF}
-	case model.StateError:
-		return "error", color.NRGBA{R: 0xB6, G: 0x3B, B: 0x2F, A: 0xFF}
+func badgeStyle(state model.State, detail string) (string, color.NRGBA) {
+	switch codexStatusLineState(state, detail) {
+	case "Ready":
+		return "Ready", color.NRGBA{R: 0x58, G: 0x72, B: 0x58, A: 0xFF}
+	case "Thinking":
+		return "Thinking", color.NRGBA{R: 0x19, G: 0x5F, B: 0x92, A: 0xFF}
+	case "Working":
+		return "Working", color.NRGBA{R: 0xBC, G: 0x7A, B: 0x00, A: 0xFF}
+	case "Error":
+		return "Error", color.NRGBA{R: 0xB6, G: 0x3B, B: 0x2F, A: 0xFF}
 	default:
-		return "offline", color.NRGBA{R: 0x4A, G: 0x4B, B: 0x50, A: 0xFF}
+		return "Offline", color.NRGBA{R: 0x4A, G: 0x4B, B: 0x50, A: 0xFF}
 	}
 }
 
 func titleForState(state model.State) string {
-	state = normalizeCompatState(state)
-	switch state {
-	case model.StateAttention:
-		return "Open"
-	case model.StateError:
+	switch codexStatusLineState(state, "") {
+	case "Ready":
+		return "Ready"
+	case "Thinking":
+		return "Thinking"
+	case "Working":
+		return "Working"
+	case "Error":
 		return "This run hit an error"
-	case model.StateRun, model.StateRunning, model.StateRunningBash:
-		return "Codex is working"
-	case model.StateIdle:
-		return "Currently idle"
 	default:
 		return "Codex companion"
 	}
 }
 
 func summaryForState(state model.State, connected bool, lastError string) string {
-	state = normalizeCompatState(state)
 	if !connected && lastError != "" {
 		return "Connection to the remote buddy is unavailable: " + lastError
 	}
-	switch state {
-	case model.StateAttention:
-		return "A run just finished. It is open for a follow-up step."
-	case model.StateError:
+	switch codexStatusLineState(state, "") {
+	case "Ready":
+		return "Codex is ready for the next prompt or follow-up."
+	case "Thinking":
+		return "Codex is reasoning and composing the next response."
+	case "Working":
+		return "Codex is running a tool or command."
+	case "Error":
 		return "An error notification will pop up when intervention is needed."
-	case model.StateRun, model.StateRunning, model.StateRunningBash:
-		return "Remote session is active. Alerts and quick actions stay available here."
-	case model.StateIdle:
-		return "There is no active task right now."
 	default:
 		return "Waiting for remote codex-buddy state."
 	}
 }
 
-func sessionBadgeStyle(state model.State) (string, color.NRGBA) {
-	state = normalizeSessionState(state)
-	switch state {
-	case model.StateIdle:
-		return "idle", color.NRGBA{R: 0x58, G: 0x72, B: 0x58, A: 0xFF}
-	case model.StateRun, model.StateRunning, model.StateRunningBash:
-		return "RUN", color.NRGBA{R: 0x19, G: 0x5F, B: 0x92, A: 0xFF}
-	case model.StateAttention:
-		return "open", color.NRGBA{R: 0xBC, G: 0x7A, B: 0x00, A: 0xFF}
-	case model.StateError:
-		return "error", color.NRGBA{R: 0xB6, G: 0x3B, B: 0x2F, A: 0xFF}
+func sessionBadgeStyle(state model.State, detail string) (string, color.NRGBA) {
+	switch codexStatusLineState(state, detail) {
+	case "Ready":
+		return "Ready", color.NRGBA{R: 0x58, G: 0x72, B: 0x58, A: 0xFF}
+	case "Thinking":
+		return "Thinking", color.NRGBA{R: 0x19, G: 0x5F, B: 0x92, A: 0xFF}
+	case "Working":
+		return "Working", color.NRGBA{R: 0xBC, G: 0x7A, B: 0x00, A: 0xFF}
+	case "Error":
+		return "Error", color.NRGBA{R: 0xB6, G: 0x3B, B: 0x2F, A: 0xFF}
 	default:
-		return "idle", color.NRGBA{R: 0x58, G: 0x72, B: 0x58, A: 0xFF}
+		return "Offline", color.NRGBA{R: 0x4A, G: 0x4B, B: 0x50, A: 0xFF}
 	}
 }
 func cardTitle(primary *NotificationResponse) string {
@@ -3146,6 +3320,7 @@ func sessionListObjects(sessions []SessionResponse, hasOpenSessions bool, darkMo
 
 func (a *App) openSessionRow(session SessionResponse, darkMode bool, state sessionListState) *stickySessionRow {
 	header := a.buildOpenSessionHeader(session, darkMode, state)
+	highlighted := sessionActionKey(session) == state.shortcutSessionKey
 
 	summary := sessionSummaryObject(session, darkMode, "Waiting for approval")
 
@@ -3168,7 +3343,7 @@ func (a *App) openSessionRow(session SessionResponse, darkMode bool, state sessi
 		objects = append(objects, progress)
 	}
 
-	row := newStickySessionRow(header, container.NewVBox(objects[1:]...), darkMode)
+	row := newStickySessionRow(header, container.NewVBox(objects[1:]...), darkMode, highlighted)
 	row.session = session
 	return row
 }
@@ -3179,13 +3354,14 @@ func (a *App) buildOpenSessionHeader(session SessionResponse, darkMode bool, sta
 	title.Truncation = fyne.TextTruncateEllipsis
 
 	actionBadges := []fyne.CanvasObject{sourceBadge(session.ServerName, session.ServerID, darkMode)}
-	for _, kind := range []openSessionActionKind{
-		openSessionActionContinue,
-		openSessionActionVoice,
-		openSessionActionClose,
-		openSessionActionJump,
-	} {
+	for _, kind := range openSessionActionKinds {
 		actionKey := openSessionActionKey(session, kind)
+		key := state.shortcuts[actionKey]
+		pending := state.pending[actionKey]
+		enabled := isOpenSessionActionAvailable(session, kind)
+		if !pending && (!enabled || key == "") {
+			continue
+		}
 		var onTapped func()
 		if kind == openSessionActionVoice {
 			sessionCopy := session
@@ -3196,10 +3372,10 @@ func (a *App) buildOpenSessionHeader(session SessionResponse, darkMode bool, sta
 		}
 		actionBadges = append(actionBadges, openSessionActionBadge(
 			kind,
-			state.shortcuts[actionKey],
+			key,
 			state.holdActionKey == actionKey && state.holdProgress > 0,
-			state.pending[actionKey],
-			isOpenSessionActionAvailable(session, kind),
+			pending,
+			enabled,
 			onTapped,
 		))
 	}
@@ -3207,19 +3383,26 @@ func (a *App) buildOpenSessionHeader(session SessionResponse, darkMode bool, sta
 	return container.NewBorder(nil, nil, nil, badges, title)
 }
 
-func newStickySessionRow(header fyne.CanvasObject, body fyne.CanvasObject, darkMode bool) *stickySessionRow {
+func newStickySessionRow(header fyne.CanvasObject, body fyne.CanvasObject, darkMode bool, highlighted bool) *stickySessionRow {
 	padding := theme.Padding()
+	cardBG := canvas.NewRectangle(openSessionHighlightFill(darkMode))
+	cardBG.CornerRadius = 10
 	row := &stickySessionRow{
 		session:     SessionResponse{},
+		cardBG:      cardBG,
 		headerBG:    canvas.NewRectangle(cardFill(darkMode)),
 		header:      header,
 		body:        body,
 		sideInset:   padding,
 		topInset:    padding,
 		bottomInset: padding,
+		highlighted: highlighted,
+	}
+	if !highlighted {
+		row.cardBG.Hide()
 	}
 	row.headerBG.Hide()
-	row.root = container.New(&stickySessionRowLayout{row: row}, row.headerBG, row.body, row.header)
+	row.root = container.New(&stickySessionRowLayout{row: row}, row.cardBG, row.headerBG, row.body, row.header)
 	return row
 }
 
@@ -3240,11 +3423,33 @@ func (r *stickySessionRow) setStickyState(active bool, offset float32) {
 	r.root.Refresh()
 }
 
+func (r *stickySessionRow) setHighlight(highlighted bool, darkMode bool) {
+	if r.highlighted == highlighted && r.cardBG.FillColor == openSessionHighlightFill(darkMode) {
+		return
+	}
+	r.highlighted = highlighted
+	r.cardBG.FillColor = openSessionHighlightFill(darkMode)
+	if highlighted {
+		r.cardBG.Show()
+	} else {
+		r.cardBG.Hide()
+	}
+	r.cardBG.Refresh()
+}
+
+func (r *stickySessionRow) setHeader(header fyne.CanvasObject) {
+	r.header = header
+	if r.root == nil || len(r.root.Objects) == 0 {
+		return
+	}
+	r.root.Objects[len(r.root.Objects)-1] = header
+}
+
 func openSessionActionBadge(kind openSessionActionKind, key fyne.KeyName, active bool, pending bool, enabled bool, onTapped func()) fyne.CanvasObject {
 	label := openSessionActionLabel(kind)
 	fill := color.NRGBA{R: 0x4A, G: 0x4B, B: 0x50, A: 0xFF}
 	textColor := color.Color(color.White)
-	display := label + " -"
+	display := label
 
 	switch {
 	case pending:
@@ -3258,9 +3463,6 @@ func openSessionActionBadge(kind openSessionActionKind, key fyne.KeyName, active
 		if active {
 			fill = color.NRGBA{R: 0xBC, G: 0x7A, B: 0x00, A: 0xFF}
 		}
-	default:
-		display = label + "(-)"
-		textColor = color.NRGBA{R: 0xCF, G: 0xD4, B: 0xDB, A: 0xFF}
 	}
 
 	if onTapped != nil {
@@ -3469,7 +3671,7 @@ func sessionRow(session SessionResponse, darkMode bool) fyne.CanvasObject {
 
 	badges := container.NewHBox(
 		sourceBadge(session.ServerName, session.ServerID, darkMode),
-		stateBadge(session.State),
+		stateBadge(session.State, session.StateDetail),
 	)
 
 	header := container.NewBorder(
@@ -3510,13 +3712,13 @@ func sessionListDivider(darkMode bool) fyne.CanvasObject {
 	return container.NewPadded(line)
 }
 
-func stateBadge(state model.State) fyne.CanvasObject {
-	label, fill := sessionBadgeStyle(state)
+func stateBadge(state model.State, detail string) fyne.CanvasObject {
+	label, fill := sessionBadgeStyle(state, detail)
 	bg := canvas.NewRectangle(fill)
-	bg.SetMinSize(fyne.NewSize(110, 32))
+	bg.SetMinSize(fyne.NewSize(132, 32))
 	bg.CornerRadius = 10
 
-	text := canvas.NewText(strings.ToUpper(label), color.White)
+	text := canvas.NewText(label, color.White)
 	text.Alignment = fyne.TextAlignCenter
 	text.TextStyle = fyne.TextStyle{Bold: true}
 	text.TextSize = 22
@@ -3533,10 +3735,10 @@ func connectivityBadge(connected bool) fyne.CanvasObject {
 	}
 
 	bg := canvas.NewRectangle(fill)
-	bg.SetMinSize(fyne.NewSize(110, 32))
+	bg.SetMinSize(fyne.NewSize(132, 32))
 	bg.CornerRadius = 10
 
-	text := canvas.NewText(strings.ToUpper(label), color.White)
+	text := canvas.NewText(label, color.White)
 	text.Alignment = fyne.TextAlignCenter
 	text.TextStyle = fyne.TextStyle{Bold: true}
 	text.TextSize = 22
@@ -3713,6 +3915,10 @@ func htmlSummaryNodeObjects(node *xhtml.Node, darkMode bool) []fyne.CanvasObject
 		switch node.Data {
 		case "p":
 			return htmlParagraphObjects(node, darkMode, "")
+		case "h1", "h2", "h3", "h4", "h5", "h6":
+			return htmlHeadingObjects(node)
+		case "blockquote":
+			return htmlBlockquoteObjects(node, darkMode)
 		case "pre":
 			text := strings.Trim(htmlNodePlainText(node), "\n")
 			if text == "" {
@@ -3735,6 +3941,34 @@ func htmlSummaryNodeObjects(node *xhtml.Node, darkMode bool) []fyne.CanvasObject
 	default:
 		return nil
 	}
+}
+
+func htmlHeadingObjects(node *xhtml.Node) []fyne.CanvasObject {
+	level := htmlHeadingLevel(node.Data)
+	lines := htmlParagraphLinesWithStyle(node, strings.Repeat("#", level)+" ", markdownHeadingStyle(level))
+	if len(lines) == 0 {
+		return nil
+	}
+	return []fyne.CanvasObject{newMarkdownParagraph(markdownJoinLines(lines))}
+}
+
+func htmlBlockquoteObjects(node *xhtml.Node, darkMode bool) []fyne.CanvasObject {
+	objects := make([]fyne.CanvasObject, 0, 4)
+	for child := node.FirstChild; child != nil; child = child.NextSibling {
+		for _, object := range htmlSummaryNodeObjects(child, darkMode) {
+			spans := []markdownSpan{{
+				Text:  "> ",
+				Style: markdownBlockquoteStyle(),
+			}}
+			if paragraph, ok := object.(*markdownParagraph); ok {
+				spans = append(spans, paragraph.spans...)
+				objects = append(objects, newMarkdownParagraph(applyMarkdownStyle(spans, markdownBlockquoteStyle())))
+				continue
+			}
+			objects = append(objects, object)
+		}
+	}
+	return objects
 }
 
 func htmlListObjects(node *xhtml.Node, ordered bool, darkMode bool) []fyne.CanvasObject {
@@ -3779,11 +4013,15 @@ func htmlParagraphObjects(node *xhtml.Node, darkMode bool, prefix string) []fyne
 }
 
 func htmlParagraphLines(node *xhtml.Node, prefix string) [][]markdownSpan {
+	return htmlParagraphLinesWithStyle(node, prefix, widget.RichTextStyleInline)
+}
+
+func htmlParagraphLinesWithStyle(node *xhtml.Node, prefix string, style widget.RichTextStyle) [][]markdownSpan {
 	lines := [][]markdownSpan{{}}
 	if prefix != "" {
-		lines[0] = append(lines[0], markdownSpan{Text: prefix, Style: widget.RichTextStyleInline})
+		lines[0] = append(lines[0], markdownSpan{Text: prefix, Style: style})
 	}
-	htmlAppendInlineNode(&lines, node, widget.RichTextStyleInline)
+	htmlAppendInlineNode(&lines, node, style)
 	return normalizeMarkdownLines(lines)
 }
 
@@ -3812,6 +4050,10 @@ func htmlAppendInlineNode(lines *[][]markdownSpan, node *xhtml.Node, style widge
 			return
 		case "a":
 			linkStyle := mergedMarkdownStyle(style, markdownLinkStyle())
+			if display := htmlLinkDisplayText(node); display != "" {
+				htmlAppendLineSpan(lines, markdownSpan{Text: display, Style: linkStyle})
+				return
+			}
 			for child := node.FirstChild; child != nil; child = child.NextSibling {
 				htmlAppendInlineNode(lines, child, linkStyle)
 			}
@@ -3828,6 +4070,8 @@ func htmlAppendInlineNode(lines *[][]markdownSpan, node *xhtml.Node, style widge
 				SizeName:  theme.SizeNameText,
 				TextStyle: fyne.TextStyle{Italic: true},
 			})
+		case "s", "del", "strike":
+			style = mergedMarkdownStyle(style, markdownStrikethroughStyle())
 		case "p", "li", "span":
 		default:
 		}
@@ -3847,6 +4091,33 @@ func htmlAppendLineSpan(lines *[][]markdownSpan, span markdownSpan) {
 	}
 	lastIndex := len(*lines) - 1
 	(*lines)[lastIndex] = append((*lines)[lastIndex], span)
+}
+
+func htmlHeadingLevel(tag string) int {
+	if len(tag) == 2 && tag[0] == 'h' && tag[1] >= '1' && tag[1] <= '6' {
+		return int(tag[1] - '0')
+	}
+	return 6
+}
+
+func htmlLinkDisplayText(node *xhtml.Node) string {
+	href := htmlAttr(node, "href")
+	if href == "" || !isLocalPathLikeLink(href) {
+		return ""
+	}
+	return displayLocalLinkTarget(href)
+}
+
+func htmlAttr(node *xhtml.Node, key string) string {
+	if node == nil {
+		return ""
+	}
+	for _, attr := range node.Attr {
+		if attr.Key == key {
+			return stdhtml.UnescapeString(attr.Val)
+		}
+	}
+	return ""
 }
 
 func normalizeHTMLText(value string) string {
@@ -3870,6 +4141,100 @@ func normalizeHTMLText(value string) string {
 		lastSpace = false
 	}
 	return builder.String()
+}
+
+func applyMarkdownStyle(spans []markdownSpan, style widget.RichTextStyle) []markdownSpan {
+	out := make([]markdownSpan, 0, len(spans))
+	for _, span := range spans {
+		span.Style = mergedMarkdownStyle(style, span.Style)
+		out = append(out, span)
+	}
+	return compactMarkdownSpans(out)
+}
+
+func isLocalPathLikeLink(value string) bool {
+	return strings.HasPrefix(value, "file://") ||
+		strings.HasPrefix(value, "/") ||
+		strings.HasPrefix(value, "~/") ||
+		strings.HasPrefix(value, "./") ||
+		strings.HasPrefix(value, "../") ||
+		strings.HasPrefix(value, `\\`) ||
+		(len(value) >= 3 && isASCIILetter(value[0]) && value[1] == ':' && (value[2] == '/' || value[2] == '\\'))
+}
+
+func displayLocalLinkTarget(value string) string {
+	pathText := value
+	if strings.HasPrefix(value, "file://") {
+		if parsed, err := url.Parse(value); err == nil {
+			pathText = parsed.Path
+			if parsed.Host != "" && parsed.Host != "localhost" {
+				pathText = "//" + parsed.Host + pathText
+			}
+			if decoded, err := url.PathUnescape(pathText); err == nil {
+				pathText = decoded
+			}
+		}
+	}
+
+	suffix := ""
+	if before, after, ok := strings.Cut(pathText, "#"); ok && isHashLocationSuffix(after) {
+		pathText = before
+		suffix = "#" + after
+	} else if colonSuffix := trailingColonLocationSuffix(pathText); colonSuffix != "" {
+		pathText = strings.TrimSuffix(pathText, colonSuffix)
+		suffix = colonSuffix
+	}
+
+	pathText = expandLocalDisplayPath(pathText)
+	if cwd, err := os.Getwd(); err == nil {
+		if rel, err := filepath.Rel(cwd, pathText); err == nil && rel != "." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) && rel != ".." {
+			pathText = rel
+		}
+	}
+	return filepath.ToSlash(pathText) + suffix
+}
+
+func expandLocalDisplayPath(value string) string {
+	value = strings.ReplaceAll(value, "\\", "/")
+	if rest, ok := strings.CutPrefix(value, "./"); ok {
+		return rest
+	}
+	if rest, ok := strings.CutPrefix(value, "~/"); ok {
+		if home, err := os.UserHomeDir(); err == nil {
+			return filepath.Join(home, rest)
+		}
+	}
+	return value
+}
+
+func trailingColonLocationSuffix(value string) string {
+	last := strings.LastIndex(value, ":")
+	if last < 0 || last == len(value)-1 {
+		return ""
+	}
+	suffix := value[last:]
+	for _, r := range suffix[1:] {
+		if !unicode.IsDigit(r) && r != ':' && r != '-' {
+			return ""
+		}
+	}
+	return suffix
+}
+
+func isHashLocationSuffix(value string) bool {
+	if !strings.HasPrefix(value, "L") || len(value) < 2 {
+		return false
+	}
+	for _, r := range value[1:] {
+		if !unicode.IsDigit(r) && r != 'C' && r != 'L' && r != '-' {
+			return false
+		}
+	}
+	return true
+}
+
+func isASCIILetter(value byte) bool {
+	return value >= 'a' && value <= 'z' || value >= 'A' && value <= 'Z'
 }
 
 func htmlNodePlainText(node *xhtml.Node) string {
@@ -4199,7 +4564,41 @@ func markdownLinkStyle() widget.RichTextStyle {
 		ColorName: theme.ColorNamePrimary,
 		Inline:    true,
 		SizeName:  theme.SizeNameText,
-		TextStyle: fyne.TextStyle{Bold: true},
+		TextStyle: fyne.TextStyle{Underline: true},
+	}
+}
+
+func markdownHeadingStyle(level int) widget.RichTextStyle {
+	style := widget.RichTextStyle{
+		Inline:   true,
+		SizeName: theme.SizeNameText,
+	}
+	switch level {
+	case 1:
+		style.TextStyle = fyne.TextStyle{Bold: true, Underline: true}
+	case 2:
+		style.TextStyle = fyne.TextStyle{Bold: true}
+	case 3:
+		style.TextStyle = fyne.TextStyle{Bold: true, Italic: true}
+	default:
+		style.TextStyle = fyne.TextStyle{Italic: true}
+	}
+	return style
+}
+
+func markdownBlockquoteStyle() widget.RichTextStyle {
+	return widget.RichTextStyle{
+		ColorName: theme.ColorNameSuccess,
+		Inline:    true,
+		SizeName:  theme.SizeNameText,
+	}
+}
+
+func markdownStrikethroughStyle() widget.RichTextStyle {
+	return widget.RichTextStyle{
+		Inline:    true,
+		SizeName:  theme.SizeNameText,
+		TextStyle: fyne.TextStyle{Italic: true},
 	}
 }
 
@@ -4418,14 +4817,8 @@ func parseOpenSessionActionKey(actionKey string) (string, openSessionActionKind)
 }
 
 func openSessionActionKeys(session SessionResponse) []string {
-	kinds := []openSessionActionKind{
-		openSessionActionContinue,
-		openSessionActionVoice,
-		openSessionActionClose,
-		openSessionActionJump,
-	}
-	keys := make([]string, 0, len(kinds))
-	for _, kind := range kinds {
+	keys := make([]string, 0, len(openSessionActionKinds))
+	for _, kind := range openSessionActionKinds {
 		if isOpenSessionActionAvailable(session, kind) {
 			keys = append(keys, openSessionActionKey(session, kind))
 		}
@@ -4434,12 +4827,7 @@ func openSessionActionKeys(session SessionResponse) []string {
 }
 
 func openSessionActionHintText(session SessionResponse, state sessionListState) string {
-	for _, kind := range []openSessionActionKind{
-		openSessionActionContinue,
-		openSessionActionVoice,
-		openSessionActionClose,
-		openSessionActionJump,
-	} {
+	for _, kind := range openSessionActionKinds {
 		actionKey := openSessionActionKey(session, kind)
 		if state.pending[actionKey] {
 			return strings.ToUpper(openSessionActionLabel(kind)) + " in progress..."
@@ -4460,12 +4848,7 @@ func openSessionActionHintText(session SessionResponse, state sessionListState) 
 	}
 
 	available := make([]string, 0, 3)
-	for _, kind := range []openSessionActionKind{
-		openSessionActionContinue,
-		openSessionActionVoice,
-		openSessionActionClose,
-		openSessionActionJump,
-	} {
+	for _, kind := range openSessionActionKinds {
 		if !isOpenSessionActionAvailable(session, kind) {
 			continue
 		}
@@ -4506,6 +4889,18 @@ func clonePendingMap(source map[string]bool) map[string]bool {
 		out[key] = value
 	}
 	return out
+}
+
+func sameStringSlice(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
 }
 
 func sessionLabelByID(sessions []SessionResponse, serverID, sessionID string) string {
@@ -4817,6 +5212,13 @@ func cardFill(darkMode bool) color.NRGBA {
 		return color.NRGBA{R: 0x1E, G: 0x1E, B: 0x1E, A: 0xFF}
 	}
 	return color.NRGBA{R: 0xFF, G: 0xFD, B: 0xF8, A: 0xFF}
+}
+
+func openSessionHighlightFill(darkMode bool) color.NRGBA {
+	if darkMode {
+		return color.NRGBA{R: 0x34, G: 0x2A, B: 0x1D, A: 0xFF}
+	}
+	return color.NRGBA{R: 0xFF, G: 0xF1, B: 0xD8, A: 0xFF}
 }
 
 func cardBorder(darkMode bool, highlight bool) color.NRGBA {

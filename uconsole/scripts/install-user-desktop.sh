@@ -47,10 +47,12 @@ escape_sed_replacement() {
 
 BIN_TARGET_ESCAPED="$(escape_sed_replacement "${BIN_TARGET}")"
 SERVER_URL_ESCAPED="$(escape_sed_replacement "${SERVER_URL}")"
+ICON_TARGET_ESCAPED="$(escape_sed_replacement "${ICON_TARGET}")"
 
 sed \
 	-e "s|__BIN_TARGET__|${BIN_TARGET_ESCAPED}|g" \
 	-e "s|__SERVER_URL__|${SERVER_URL_ESCAPED}|g" \
+	-e "s|__ICON_TARGET__|${ICON_TARGET_ESCAPED}|g" \
 	"${DESKTOP_TEMPLATE}" > "${DESKTOP_FILE}"
 
 chmod +x "${DESKTOP_FILE}"
