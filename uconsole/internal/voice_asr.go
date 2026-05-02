@@ -37,7 +37,7 @@ type voiceASRConfig struct {
 	WhisperPromptField      string
 	WhisperGlossaryField    string
 	WhisperContextField     string
-	WhisperEnableCorrection bool
+	WhisperCorrectionMode   string
 	WhisperNoProxy          bool
 	VoiceRecorder           string
 	VoiceInput              string
@@ -65,7 +65,7 @@ func loadVoiceASRConfig() voiceASRConfig {
 		WhisperPromptField:      firstNonEmptyText(values["WHISPER_PROMPT_FIELD"], "prompt"),
 		WhisperGlossaryField:    firstNonEmptyText(values["WHISPER_PROMPT_GLOSSARY_FIELD"], "promptGlossary"),
 		WhisperContextField:     firstNonEmptyText(values["WHISPER_CONTEXT_FIELD"], "contextText"),
-		WhisperEnableCorrection: envBool(values["WHISPER_ENABLE_CORRECTION"], true),
+		WhisperCorrectionMode:   resolveWhisperCorrectionMode(values),
 		WhisperNoProxy:          envBool(values["WHISPER_NO_PROXY"], true),
 		VoiceRecorder:           firstNonEmptyText(values["VOICE_RECORDER"], "auto"),
 		VoiceInput:              firstNonEmptyText(values["VOICE_INPUT"], "default"),
@@ -187,8 +187,8 @@ func transcribeVoiceCapture(ctx context.Context, cfg voiceASRConfig, session Ses
 	if cfg.WhisperLanguage != "" {
 		_ = writer.WriteField("language", cfg.WhisperLanguage)
 	}
-	if cfg.WhisperEnableCorrection {
-		_ = writer.WriteField("enableCorrection", "true")
+	if cfg.WhisperCorrectionMode != "" {
+		_ = writer.WriteField("correctionMode", cfg.WhisperCorrectionMode)
 	}
 	if cfg.WhisperPrompt != "" {
 		_ = writer.WriteField(cfg.WhisperPromptField, cfg.WhisperPrompt)
@@ -477,6 +477,21 @@ func loadSimpleEnvFile(path string) map[string]string {
 		values[key] = value
 	}
 	return values
+}
+
+func resolveWhisperCorrectionMode(values map[string]string) string {
+	mode := strings.ToLower(strings.TrimSpace(values["WHISPER_CORRECTION_MODE"]))
+	switch mode {
+	case "off", "on", "auto":
+		return mode
+	}
+	if _, ok := values["WHISPER_ENABLE_CORRECTION"]; ok {
+		if envBool(values["WHISPER_ENABLE_CORRECTION"], true) {
+			return "on"
+		}
+		return "off"
+	}
+	return "auto"
 }
 
 func voiceConfigPath() string {
