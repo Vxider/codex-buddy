@@ -15,8 +15,23 @@ func checkCodexHooksEnabled(path string) error {
 	if err != nil {
 		return err
 	}
-	if !strings.Contains(string(data), "codex_hooks = true") {
-		return errors.New("codex_hooks is not enabled")
+	content := string(data)
+	if !strings.Contains(content, codexBuddyHooksBegin) || !strings.Contains(content, "codex-buddy hook") {
+		return errors.New("codex-buddy hooks are not configured in config.toml")
+	}
+	return nil
+}
+
+func checkNoLegacyCodexBuddyHooks(path string) error {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
+	}
+	if strings.Contains(string(data), "codex-buddy hook") {
+		return errors.New("legacy hooks.json still contains codex-buddy hooks")
 	}
 	return nil
 }

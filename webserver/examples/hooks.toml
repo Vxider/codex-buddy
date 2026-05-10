@@ -1,0 +1,21 @@
+# Add this block to ~/.codex/config.toml.
+
+# BEGIN codex-buddy hooks
+[[hooks.SessionStart]]
+matcher = "startup|resume"
+hooks = [{ type = "command", command = "~/.local/bin/codex-buddy hook session-start --config ~/.config/codex-buddy/config.json", statusMessage = "codex-buddy session-start" }]
+
+[[hooks.UserPromptSubmit]]
+hooks = [{ type = "command", command = "~/.local/bin/codex-buddy hook user-prompt-submit --config ~/.config/codex-buddy/config.json" }]
+
+[[hooks.PreToolUse]]
+matcher = "Bash"
+hooks = [{ type = "command", command = "~/.local/bin/codex-buddy hook pre-tool-use --config ~/.config/codex-buddy/config.json" }]
+
+[[hooks.PostToolUse]]
+matcher = "Bash"
+hooks = [{ type = "command", command = "~/.local/bin/codex-buddy hook post-tool-use --config ~/.config/codex-buddy/config.json" }]
+
+[[hooks.Stop]]
+hooks = [{ type = "command", command = "~/.local/bin/codex-buddy hook stop --config ~/.config/codex-buddy/config.json" }]
+# END codex-buddy hooks

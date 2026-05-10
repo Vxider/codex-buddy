@@ -54,7 +54,7 @@ func runSetup(args []string) int {
 	logger.Printf("setup completed")
 	logger.Printf("binary: %s", paths.binPath)
 	logger.Printf("config: %s", resolvedConfigPath)
-	logger.Printf("hooks: %s", paths.hooksPath)
+	logger.Printf("codex hooks: %s", paths.codexConfigPath)
 	if !skipSystemd {
 		logger.Printf("service: %s", paths.servicePath)
 	}
@@ -69,11 +69,11 @@ func installArtifacts(cfg config.Config, resolvedConfigPath string, paths userPa
 	if err := writeConfigJSON(resolvedConfigPath, cfg); err != nil {
 		return fmt.Errorf("write config: %w", err)
 	}
-	if err := ensureCodexHooksEnabled(paths.codexConfigPath); err != nil {
-		return fmt.Errorf("enable codex hooks: %w", err)
-	}
-	if err := writeHooksJSON(paths.hooksPath, paths.binPath, resolvedConfigPath); err != nil {
+	if err := writeCodexHooksConfig(paths.codexConfigPath, paths.binPath, resolvedConfigPath); err != nil {
 		return fmt.Errorf("write hooks: %w", err)
+	}
+	if err := removeLegacyCodexBuddyHooks(paths.legacyHooksPath); err != nil {
+		return fmt.Errorf("remove legacy hooks: %w", err)
 	}
 	if skipSystemd {
 		return nil

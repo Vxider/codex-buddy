@@ -8,7 +8,7 @@ import (
 type userPaths struct {
 	home            string
 	binPath         string
-	hooksPath       string
+	legacyHooksPath string
 	codexConfigPath string
 	servicePath     string
 }
@@ -22,7 +22,7 @@ func resolveUserPaths() (userPaths, error) {
 	return userPaths{
 		home:            home,
 		binPath:         filepath.Join(home, ".local", "bin", "codex-buddy"),
-		hooksPath:       filepath.Join(home, ".codex", "hooks.json"),
+		legacyHooksPath: filepath.Join(home, ".codex", "hooks.json"),
 		codexConfigPath: filepath.Join(home, ".codex", "config.toml"),
 		servicePath:     filepath.Join(home, ".config", "systemd", "user", "codex-buddy.service"),
 	}, nil

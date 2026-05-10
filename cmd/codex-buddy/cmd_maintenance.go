@@ -43,9 +43,10 @@ func runDoctor(args []string) int {
 		err  error
 	}{
 		{"config", checkFileExists(resolvedConfigPath)},
-		{"hooks", checkFileExists(paths.hooksPath)},
+		{"codex config", checkFileExists(paths.codexConfigPath)},
 		{"service", checkFileExists(paths.servicePath)},
-		{"codex hooks enabled", checkCodexHooksEnabled(paths.codexConfigPath)},
+		{"codex hooks", checkCodexHooksEnabled(paths.codexConfigPath)},
+		{"legacy hooks", checkNoLegacyCodexBuddyHooks(paths.legacyHooksPath)},
 		{"daemon http", checkStatusEndpoint(cfg)},
 	}
 
@@ -244,8 +245,12 @@ func runUninstall(args []string) int {
 	_ = os.Remove(paths.servicePath)
 	_ = runCommand("systemctl", "--user", "daemon-reload")
 
-	if err := os.Remove(paths.hooksPath); err != nil && !os.IsNotExist(err) {
+	if err := removeCodexBuddyHooksConfig(paths.codexConfigPath); err != nil {
 		fmt.Printf("remove hooks: %v\n", err)
+		return 1
+	}
+	if err := removeLegacyCodexBuddyHooks(paths.legacyHooksPath); err != nil {
+		fmt.Printf("remove legacy hooks: %v\n", err)
 		return 1
 	}
 	if err := os.Remove(resolvedConfigPath); err != nil && !os.IsNotExist(err) {
@@ -260,7 +265,7 @@ func runUninstall(args []string) int {
 	}
 
 	fmt.Printf("removed service: %s\n", paths.servicePath)
-	fmt.Printf("removed hooks: %s\n", paths.hooksPath)
+	fmt.Printf("removed hooks from: %s\n", paths.codexConfigPath)
 	fmt.Printf("removed config: %s\n", resolvedConfigPath)
 	if keepBinary {
 		fmt.Printf("kept binary: %s\n", paths.binPath)

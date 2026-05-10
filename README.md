@@ -85,11 +85,13 @@ Notes:
 
 ## Setup
 
-Write the initial config, hook definitions, and `systemd --user` service:
+Write the initial config, Codex `config.toml` hook definitions, and `systemd --user` service:
 
 ```bash
 codex-buddy setup
 ```
+
+`setup` writes a managed hook block to `~/.codex/config.toml`. Recent Codex versions expose hooks as a stable feature, so no separate `codex_hooks` feature flag or `~/.codex/hooks.json` file is required.
 
 Start or restart the service:
 

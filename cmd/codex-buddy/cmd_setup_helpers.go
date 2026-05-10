@@ -51,7 +51,12 @@ func writeConfigJSON(path string, cfg config.Config) error {
 	return os.WriteFile(path, data, 0o600)
 }
 
-func writeHooksJSON(path, binPath, configPath string) error {
+const (
+	codexBuddyHooksBegin = "# BEGIN codex-buddy hooks"
+	codexBuddyHooksEnd   = "# END codex-buddy hooks"
+)
+
+func writeCodexHooksConfig(path, binPath, configPath string) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return err
 	}
@@ -60,71 +65,42 @@ func writeHooksJSON(path, binPath, configPath string) error {
 		return shellQuote(binPath) + " hook " + event + " --config " + shellQuote(configPath)
 	}
 
-	payload := map[string]any{
-		"hooks": map[string]any{
-			"SessionStart": []any{
-				map[string]any{
-					"matcher": "startup|resume",
-					"hooks": []any{
-						map[string]any{
-							"type":          "command",
-							"command":       command("session-start"),
-							"statusMessage": "codex-buddy session-start",
-						},
-					},
-				},
-			},
-			"UserPromptSubmit": []any{
-				map[string]any{
-					"hooks": []any{
-						map[string]any{
-							"type":    "command",
-							"command": command("user-prompt-submit"),
-						},
-					},
-				},
-			},
-			"PreToolUse": []any{
-				map[string]any{
-					"matcher": "Bash",
-					"hooks": []any{
-						map[string]any{
-							"type":    "command",
-							"command": command("pre-tool-use"),
-						},
-					},
-				},
-			},
-			"PostToolUse": []any{
-				map[string]any{
-					"matcher": "Bash",
-					"hooks": []any{
-						map[string]any{
-							"type":    "command",
-							"command": command("post-tool-use"),
-						},
-					},
-				},
-			},
-			"Stop": []any{
-				map[string]any{
-					"hooks": []any{
-						map[string]any{
-							"type":    "command",
-							"command": command("stop"),
-						},
-					},
-				},
-			},
-		},
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if !os.IsNotExist(err) {
+			return err
+		}
 	}
 
-	data, err := json.MarshalIndent(payload, "", "  ")
-	if err != nil {
-		return err
+	content := removeManagedHooksBlock(string(data))
+	hooks := strings.TrimSpace(fmt.Sprintf(`
+%s
+[[hooks.SessionStart]]
+matcher = "startup|resume"
+hooks = [{ type = "command", command = %s, statusMessage = "codex-buddy session-start" }]
+
+[[hooks.UserPromptSubmit]]
+hooks = [{ type = "command", command = %s }]
+
+[[hooks.PreToolUse]]
+matcher = "Bash"
+hooks = [{ type = "command", command = %s }]
+
+[[hooks.PostToolUse]]
+matcher = "Bash"
+hooks = [{ type = "command", command = %s }]
+
+[[hooks.Stop]]
+hooks = [{ type = "command", command = %s }]
+%s
+`, codexBuddyHooksBegin, tomlQuote(command("session-start")), tomlQuote(command("user-prompt-submit")), tomlQuote(command("pre-tool-use")), tomlQuote(command("post-tool-use")), tomlQuote(command("stop")), codexBuddyHooksEnd))
+
+	content = strings.TrimRight(content, "\n")
+	if content != "" {
+		content += "\n\n"
 	}
-	data = append(data, '\n')
-	return os.WriteFile(path, data, 0o644)
+	content += hooks + "\n"
+	return os.WriteFile(path, []byte(content), 0o600)
 }
 
 func writeServiceFile(path, configPath string) error {
@@ -147,33 +123,67 @@ WantedBy=default.target
 	return os.WriteFile(path, []byte(content), 0o644)
 }
 
-func ensureCodexHooksEnabled(path string) error {
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return err
-	}
-
+func removeLegacyCodexBuddyHooks(path string) error {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return os.WriteFile(path, []byte("[features]\ncodex_hooks = true\n"), 0o600)
+			return nil
 		}
 		return err
 	}
 
-	content := string(data)
-	switch {
-	case strings.Contains(content, "codex_hooks = true"):
+	if !strings.Contains(string(data), "codex-buddy hook") {
 		return nil
-	case strings.Contains(content, "codex_hooks = false"):
-		content = strings.Replace(content, "codex_hooks = false", "codex_hooks = true", 1)
-	case strings.Contains(content, "[features]"):
-		content = strings.Replace(content, "[features]", "[features]\ncodex_hooks = true", 1)
-	default:
-		content = strings.TrimRight(content, "\n") + "\n\n[features]\ncodex_hooks = true\n"
 	}
-	return os.WriteFile(path, []byte(content), 0o600)
+	return os.Remove(path)
+}
+
+func removeCodexBuddyHooksConfig(path string) error {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
+	}
+	content := removeManagedHooksBlock(string(data))
+	return os.WriteFile(path, []byte(strings.TrimRight(content, "\n")+"\n"), 0o600)
+}
+
+func managedHooksBlock(content string) string {
+	start := strings.Index(content, codexBuddyHooksBegin)
+	end := strings.Index(content, codexBuddyHooksEnd)
+	if start < 0 || end < start {
+		return ""
+	}
+	end += len(codexBuddyHooksEnd)
+	if end < len(content) && content[end] == '\n' {
+		end++
+	}
+	return content[start:end]
+}
+
+func removeManagedHooksBlock(content string) string {
+	start := strings.Index(content, codexBuddyHooksBegin)
+	end := strings.Index(content, codexBuddyHooksEnd)
+	if start < 0 || end < start {
+		return content
+	}
+	end += len(codexBuddyHooksEnd)
+	if end < len(content) && content[end] == '\n' {
+		end++
+	}
+	return strings.TrimRight(content[:start], "\n") + content[end:]
 }
 
 func shellQuote(value string) string {
 	return "'" + strings.ReplaceAll(value, "'", `'\''`) + "'"
+}
+
+func tomlQuote(value string) string {
+	encoded, err := json.Marshal(value)
+	if err != nil {
+		return `""`
+	}
+	return string(encoded)
 }

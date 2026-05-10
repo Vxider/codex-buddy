@@ -43,14 +43,19 @@ func runPrintHooks(args []string) int {
 		return 1
 	}
 
-	data, err := os.ReadFile(paths.hooksPath)
+	data, err := os.ReadFile(paths.codexConfigPath)
 	if err != nil {
 		fmt.Printf("read hooks: %v\n", err)
 		return 1
 	}
 
-	fmt.Print(string(data))
-	if len(data) == 0 || data[len(data)-1] != '\n' {
+	content := managedHooksBlock(string(data))
+	if content == "" {
+		fmt.Printf("read hooks: codex-buddy hooks are not configured in %s\n", paths.codexConfigPath)
+		return 1
+	}
+	fmt.Print(content)
+	if content[len(content)-1] != '\n' {
 		fmt.Println()
 	}
 	return 0
