@@ -132,10 +132,73 @@ func removeLegacyCodexBuddyHooks(path string) error {
 		return err
 	}
 
-	if !strings.Contains(string(data), "codex-buddy hook") {
+	var config legacyHooksConfig
+	if err := json.Unmarshal(data, &config); err != nil {
+		if strings.Contains(string(data), "codex-buddy") && strings.Contains(string(data), " hook ") {
+			return os.Remove(path)
+		}
 		return nil
 	}
-	return os.Remove(path)
+
+	changed := false
+	for event, matchers := range config.Hooks {
+		keptMatchers := matchers[:0]
+		for _, matcher := range matchers {
+			keptHooks := matcher.Hooks[:0]
+			for _, hook := range matcher.Hooks {
+				if isLegacyCodexBuddyHookCommand(hook.Command) {
+					changed = true
+					continue
+				}
+				keptHooks = append(keptHooks, hook)
+			}
+			matcher.Hooks = keptHooks
+			if len(matcher.Hooks) > 0 {
+				keptMatchers = append(keptMatchers, matcher)
+			}
+		}
+		if len(keptMatchers) == 0 {
+			delete(config.Hooks, event)
+			continue
+		}
+		config.Hooks[event] = keptMatchers
+	}
+
+	if !changed {
+		return nil
+	}
+	if len(config.Hooks) == 0 {
+		return os.Remove(path)
+	}
+	updated, err := json.MarshalIndent(config, "", "  ")
+	if err != nil {
+		return err
+	}
+	updated = append(updated, '\n')
+	return os.WriteFile(path, updated, 0o600)
+}
+
+type legacyHooksConfig struct {
+	Hooks map[string][]legacyHookMatcher `json:"hooks,omitempty"`
+}
+
+type legacyHookMatcher struct {
+	Matcher string              `json:"matcher,omitempty"`
+	Hooks   []legacyHookCommand `json:"hooks,omitempty"`
+}
+
+type legacyHookCommand struct {
+	Type          string `json:"type,omitempty"`
+	Command       string `json:"command,omitempty"`
+	StatusMessage string `json:"statusMessage,omitempty"`
+}
+
+func isLegacyCodexBuddyHookCommand(command string) bool {
+	command = strings.TrimSpace(command)
+	if command == "" {
+		return false
+	}
+	return strings.Contains(command, "codex-buddy") && strings.Contains(command, " hook ")
 }
 
 func removeCodexBuddyHooksConfig(path string) error {
