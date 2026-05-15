@@ -12,7 +12,8 @@ import (
 )
 
 func installSelf(binPath string) error {
-	if err := os.MkdirAll(filepath.Dir(binPath), 0o755); err != nil {
+	binDir := filepath.Dir(binPath)
+	if err := os.MkdirAll(binDir, 0o755); err != nil {
 		return err
 	}
 
@@ -27,13 +28,27 @@ func installSelf(binPath string) error {
 	}
 	defer src.Close()
 
-	dst, err := os.OpenFile(binPath, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o755)
+	tmp, err := os.CreateTemp(binDir, ".codex-buddy.install.*")
 	if err != nil {
 		return err
 	}
-	defer dst.Close()
+	tmpPath := tmp.Name()
+	defer func() {
+		_ = os.Remove(tmpPath)
+	}()
 
-	if _, err := io.Copy(dst, src); err != nil {
+	if _, err := io.Copy(tmp, src); err != nil {
+		_ = tmp.Close()
+		return err
+	}
+	if err := tmp.Chmod(0o755); err != nil {
+		_ = tmp.Close()
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+	if err := os.Rename(tmpPath, binPath); err != nil {
 		return err
 	}
 	return nil
