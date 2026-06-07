@@ -132,7 +132,7 @@ codex-buddy-uconsole --server-url http://<codex-host>:8787
 
 ## Configuration
 
-See the example configuration at [webserver/examples/config.example.json](/home/vxider/WorkSpace/codex-buddy/webserver/examples/config.example.json).
+See the example configuration at [webserver/examples/config.example.json](webserver/examples/config.example.json).
 
 The current default mode is passive local-network monitoring:
 
@@ -152,7 +152,7 @@ The `uconsole` config block currently includes:
 
 ## Documentation
 
-- [ios/README.md](/home/vxider/WorkSpace/codex-buddy/ios/README.md)
-- [webserver/docs/architecture.md](/home/vxider/WorkSpace/codex-buddy/webserver/docs/architecture.md)
-- [webserver/docs/software-plan.md](/home/vxider/WorkSpace/codex-buddy/webserver/docs/software-plan.md)
-- [uconsole/docs/hardware.md](/home/vxider/WorkSpace/codex-buddy/uconsole/docs/hardware.md)
+- [ios/README.md](ios/README.md)
+- [webserver/docs/architecture.md](webserver/docs/architecture.md)
+- [webserver/docs/software-plan.md](webserver/docs/software-plan.md)
+- [uconsole/docs/hardware.md](uconsole/docs/hardware.md)

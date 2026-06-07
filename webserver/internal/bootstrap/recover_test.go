@@ -3,7 +3,7 @@ package bootstrap
 import "testing"
 
 func TestParsePaneLine(t *testing.T) {
-	line := "0\t@77\t%211\t3969652\t0\tcodex\t/home/vxider/WorkSpace/FlashAI"
+	line := "0\t@77\t%211\t3969652\t0\tcodex\t/home/test/workspace/example"
 	out, ok := parsePaneLine(line)
 	if !ok {
 		t.Fatalf("expected pane line to parse")
@@ -37,7 +37,7 @@ func TestFindCodexProcessForPanePrefersResumeDescendant(t *testing.T) {
 }
 
 func TestExtractSessionIDFromTranscriptPath(t *testing.T) {
-	path := "/home/vxider/.codex/sessions/2026/04/24/rollout-2026-04-24T21-56-57-019dbfc7-8489-7b40-925f-a37935a06117.jsonl"
+	path := "/home/test/.codex/sessions/2026/04/24/rollout-2026-04-24T21-56-57-019dbfc7-8489-7b40-925f-a37935a06117.jsonl"
 	if got := extractSessionIDFromTranscriptPath(path); got != "019dbfc7-8489-7b40-925f-a37935a06117" {
 		t.Fatalf("unexpected session id: %q", got)
 	}

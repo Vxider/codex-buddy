@@ -72,7 +72,7 @@ func loadVoiceASRConfig() voiceASRConfig {
 		VoiceMinRecord:          time.Duration(envInt(values["VOICE_MIN_RECORD_MS"], 350)) * time.Millisecond,
 		VoiceSampleRate:         envInt(values["VOICE_SAMPLE_RATE"], 16000),
 		VoiceChannels:           envInt(values["VOICE_CHANNELS"], 1),
-		VoiceGlossaryFile:       expandHome(firstNonEmptyText(values["VOICE_GLOSSARY_FILE"], "~/.config/uconsole-mapper/voice-glossary.txt")),
+		VoiceGlossaryFile:       expandHome(firstNonEmptyText(values["VOICE_GLOSSARY_FILE"], "~/.config/codex-buddy/voice-glossary.txt")),
 		VoiceTmuxContext:        envBool(values["VOICE_TMUX_CONTEXT"], true),
 		VoiceTmuxContextLines:   envInt(values["VOICE_TMUX_CONTEXT_LINES"], 30),
 		VoiceTmuxContextMaxChar: envInt(values["VOICE_TMUX_CONTEXT_MAX_CHARS"], 1200),
@@ -498,7 +498,7 @@ func voiceConfigPath() string {
 	if path := strings.TrimSpace(os.Getenv("VOICE_PTT_CONFIG")); path != "" {
 		return expandHome(path)
 	}
-	return expandHome("~/.config/uconsole-mapper/voice.env")
+	return expandHome("~/.config/codex-buddy/voice.env")
 }
 
 func expandHome(path string) string {
