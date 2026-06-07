@@ -101,6 +101,10 @@ hooks = [{ type = "command", command = %s }]
 matcher = "Bash"
 hooks = [{ type = "command", command = %s }]
 
+[[hooks.PermissionRequest]]
+matcher = "Bash"
+hooks = [{ type = "command", command = %s, statusMessage = "codex-buddy permission-request" }]
+
 [[hooks.PostToolUse]]
 matcher = "Bash"
 hooks = [{ type = "command", command = %s }]
@@ -108,7 +112,7 @@ hooks = [{ type = "command", command = %s }]
 [[hooks.Stop]]
 hooks = [{ type = "command", command = %s }]
 %s
-`, codexBuddyHooksBegin, tomlQuote(command("session-start")), tomlQuote(command("user-prompt-submit")), tomlQuote(command("pre-tool-use")), tomlQuote(command("post-tool-use")), tomlQuote(command("stop")), codexBuddyHooksEnd))
+`, codexBuddyHooksBegin, tomlQuote(command("session-start")), tomlQuote(command("user-prompt-submit")), tomlQuote(command("pre-tool-use")), tomlQuote(command("permission-request")), tomlQuote(command("post-tool-use")), tomlQuote(command("stop")), codexBuddyHooksEnd))
 
 	content = strings.TrimRight(content, "\n")
 	if content != "" {

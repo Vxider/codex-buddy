@@ -48,6 +48,12 @@ func TestWriteCodexHooksConfigReplacesManagedBlock(t *testing.T) {
 	if !strings.Contains(content, `hook session-start --config`) {
 		t.Fatalf("expected session-start hook to be written, got:\n%s", content)
 	}
+	if !strings.Contains(content, `[[hooks.PermissionRequest]]`) {
+		t.Fatalf("expected permission-request hook to be written, got:\n%s", content)
+	}
+	if !strings.Contains(content, `hook permission-request --config`) {
+		t.Fatalf("expected permission-request command to be written, got:\n%s", content)
+	}
 }
 
 func TestRemoveLegacyCodexBuddyHooksDeletesOldCodexBuddyFile(t *testing.T) {

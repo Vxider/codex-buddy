@@ -89,6 +89,44 @@ func TestPreToolUseRequireEscalatedBecomesApprovalAttention(t *testing.T) {
 	}
 }
 
+func TestPermissionRequestBecomesApprovalAttention(t *testing.T) {
+	st := New(30*time.Second, 0, log.New(io.Discard, "", 0))
+	now := time.Now().UTC()
+
+	snapshot := st.ApplyIngest(model.IngestRequest{
+		EventName:  "permission-request",
+		ReceivedAt: now,
+		Payload: model.HookPayload{
+			SessionID: "sess-permission",
+			ToolName:  "Bash",
+			TmuxPane:  "%11",
+			ToolInput: map[string]any{
+				"command":       "node -e 'query db'",
+				"description":   "Run a local Postgres lookup for E2E credentials.",
+				"justification": "需要查询本机 Postgres 用户表以获得可用于 E2E 的真实登录账号，是否允许执行？",
+			},
+		},
+	})
+
+	if snapshot.OverallState != model.StateAttention {
+		t.Fatalf("expected permission request to become attention, got %s", snapshot.OverallState)
+	}
+
+	session, ok := st.Session("sess-permission")
+	if !ok {
+		t.Fatalf("expected session")
+	}
+	if session.State != model.StateAttention {
+		t.Fatalf("expected session attention, got %s", session.State)
+	}
+	if !strings.Contains(session.LastAssistantMessageFull, "local Postgres lookup") {
+		t.Fatalf("expected permission description in approval summary, got %q", session.LastAssistantMessageFull)
+	}
+	if strings.Contains(session.LastAssistantMessageFull, "真实登录账号") {
+		t.Fatalf("expected official description to win over fallback justification, got %q", session.LastAssistantMessageFull)
+	}
+}
+
 func TestEmptyStoreSnapshotStaysIdle(t *testing.T) {
 	st := New(0, 0, log.New(io.Discard, "", 0))
 

@@ -113,6 +113,16 @@ func (s *Store) ApplyIngest(req model.IngestRequest) model.StatusSnapshot {
 				session.LastBashCommand = command
 			}
 		}
+	case "permissionrequest":
+		approvalSummary := approvalRequestSummaryFromPayload(req.Payload)
+		session.LastAssistantMessageFull = approvalSummary
+		session.LastAssistantMessage = previewAssistant(approvalSummary)
+		session.State = model.StateAttention
+		session.StateDetail = string(model.StateAttention)
+		session.CurrentAttentionDeadline = s.attentionDeadline()
+		if command := previewAny(req.Payload.ToolInput); command != "" {
+			session.LastBashCommand = command
+		}
 	case "posttooluse":
 		if strings.EqualFold(req.Payload.ToolName, "Bash") || session.State == model.StateRunningBash {
 			session.State = model.StateRunning
@@ -829,11 +839,40 @@ func approvalRequestSummaryFromToolInput(value any) string {
 		return ""
 	}
 
-	reason := firstStringField(toolInput, "justification", "reason", "approval_reason", "approvalReason")
+	reason := firstStringField(toolInput, "description", "justification", "reason", "approval_reason", "approvalReason", "message", "summary")
 	if reason == "" {
 		reason = "Codex needs approval before running this command."
 	}
 	return "Approval required: " + strings.TrimSpace(reason)
+}
+
+func approvalRequestSummaryFromPayload(payload model.HookPayload) string {
+	if summary := approvalRequestSummaryFromToolInput(payload.ToolInput); summary != "" {
+		return summary
+	}
+	if toolInput, ok := normalizeToolInputMap(payload.ToolInput); ok {
+		reason := firstStringField(toolInput, "description", "justification", "reason", "message", "summary")
+		if reason != "" {
+			return "Approval required: " + reason
+		}
+	}
+
+	if payload.LastAssistantMessage != "" {
+		return "Approval required: " + strings.TrimSpace(payload.LastAssistantMessage)
+	}
+
+	blob, err := json.Marshal(payload)
+	if err == nil {
+		var values map[string]any
+		if json.Unmarshal(blob, &values) == nil {
+			reason := firstStringField(values, "justification", "reason", "message", "summary", "description", "permission_request", "permissionRequest")
+			if reason != "" {
+				return "Approval required: " + reason
+			}
+		}
+	}
+
+	return "Approval required: Codex needs approval before continuing."
 }
 
 func normalizeToolInputMap(value any) (map[string]any, bool) {
