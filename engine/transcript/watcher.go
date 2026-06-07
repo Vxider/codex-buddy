@@ -285,8 +285,11 @@ func parseLine(sessionID string, line []byte) (model.TranscriptUpdate, bool) {
 				update.LastAssistantMessage = text
 			}
 		}
-		if payload.Type == "function_call" && payload.Name == "shell_command" {
-			update.LastBashCommand = parseShellCommandArguments(payload.Args)
+		if payload.Type == "function_call" {
+			if payload.Name == "shell_command" {
+				update.LastBashCommand = parseShellCommandArguments(payload.Args)
+			}
+			updateGoalState(&update, payload.Name, payload.Args, parsedTime)
 		}
 		return update, hasUsefulTranscriptUpdate(update)
 	case "event_msg":
@@ -343,6 +346,15 @@ func mergeUpdate(dst *model.TranscriptUpdate, src model.TranscriptUpdate) {
 	} else if hasNonErrorProgress(src) {
 		dst.Error = ""
 	}
+	if src.GoalState != "" {
+		dst.GoalState = src.GoalState
+	}
+	if src.GoalSummary != "" {
+		dst.GoalSummary = src.GoalSummary
+	}
+	if !src.GoalUpdatedAt.IsZero() {
+		dst.GoalUpdatedAt = src.GoalUpdatedAt
+	}
 	if src.UpdatedAt.After(dst.UpdatedAt) {
 		dst.UpdatedAt = src.UpdatedAt
 	}
@@ -354,7 +366,8 @@ func hasNonErrorProgress(update model.TranscriptUpdate) bool {
 		update.Model != "" ||
 		update.LastUserPromptPreview != "" ||
 		update.LastAssistantMessage != "" ||
-		update.LastBashCommand != ""
+		update.LastBashCommand != "" ||
+		update.GoalState != ""
 }
 
 func joinContent(parts []contentFragment) string {
@@ -375,7 +388,8 @@ func hasUsefulTranscriptUpdate(update model.TranscriptUpdate) bool {
 		update.LastUserPromptPreview != "" ||
 		update.LastAssistantMessage != "" ||
 		update.LastBashCommand != "" ||
-		update.Error != ""
+		update.Error != "" ||
+		update.GoalState != ""
 }
 
 func parseShellCommandArguments(raw string) string {
@@ -389,4 +403,73 @@ func parseShellCommandArguments(raw string) string {
 		return ""
 	}
 	return strings.TrimSpace(payload.Command)
+}
+
+func updateGoalState(update *model.TranscriptUpdate, name string, raw string, updatedAt time.Time) {
+	if update == nil {
+		return
+	}
+	state, summary, ok := parseGoalToolCall(name, raw)
+	if !ok {
+		return
+	}
+	update.GoalState = state
+	update.GoalSummary = summary
+	update.GoalUpdatedAt = updatedAt
+}
+
+func parseGoalToolCall(name string, raw string) (model.GoalState, string, bool) {
+	name = strings.TrimSpace(name)
+	if index := strings.LastIndex(name, "."); index >= 0 {
+		name = name[index+1:]
+	}
+
+	switch name {
+	case "create_goal":
+		var payload struct {
+			Objective string `json:"objective"`
+		}
+		if err := json.Unmarshal([]byte(raw), &payload); err != nil {
+			return "", "", false
+		}
+		return model.GoalStateInProgress, strings.TrimSpace(payload.Objective), true
+	case "update_goal":
+		var payload struct {
+			Status  string `json:"status"`
+			Summary string `json:"summary"`
+			Reason  string `json:"reason"`
+		}
+		if err := json.Unmarshal([]byte(raw), &payload); err != nil {
+			return "", "", false
+		}
+		return normalizeGoalStatus(payload.Status), firstNonEmptyText(payload.Summary, payload.Reason), true
+	default:
+		return "", "", false
+	}
+}
+
+func normalizeGoalStatus(status string) model.GoalState {
+	switch strings.ToLower(strings.TrimSpace(status)) {
+	case "complete", "completed", "achieved", "done", "success", "succeeded":
+		return model.GoalStateAchieved
+	case "blocked":
+		return model.GoalStateBlocked
+	case "needs_user", "needs-user", "needs_input", "needs-input":
+		return model.GoalStateNeedsUser
+	case "in_progress", "in-progress", "active", "running":
+		return model.GoalStateInProgress
+	case "":
+		return model.GoalStateUnknown
+	default:
+		return model.GoalStateUnknown
+	}
+}
+
+func firstNonEmptyText(values ...string) string {
+	for _, value := range values {
+		if trimmed := strings.TrimSpace(value); trimmed != "" {
+			return trimmed
+		}
+	}
+	return ""
 }

@@ -15,6 +15,16 @@ const (
 	StateError       State = "error"
 )
 
+type GoalState string
+
+const (
+	GoalStateUnknown    GoalState = "unknown"
+	GoalStateInProgress GoalState = "in_progress"
+	GoalStateAchieved   GoalState = "achieved"
+	GoalStateBlocked    GoalState = "blocked"
+	GoalStateNeedsUser  GoalState = "needs_user"
+)
+
 type HookPayload struct {
 	HookEventName        string `json:"hook_event_name"`
 	SessionID            string `json:"session_id"`
@@ -58,6 +68,9 @@ type SessionSnapshot struct {
 	TmuxSession              string    `json:"-"`
 	TmuxWindow               string    `json:"-"`
 	CurrentAttentionDeadline time.Time `json:"-"`
+	GoalState                GoalState `json:"goal_state,omitempty"`
+	GoalSummary              string    `json:"goal_summary,omitempty"`
+	GoalUpdatedAt            time.Time `json:"goal_updated_at,omitempty"`
 }
 
 type RecentEvent struct {
@@ -77,6 +90,9 @@ type StatusSnapshot struct {
 	Sessions           []SessionSnapshot `json:"sessions"`
 	RecentEvents       []RecentEvent     `json:"recent_events,omitempty"`
 	TranscriptWatchers map[string]string `json:"transcript_watchers,omitempty"`
+	GoalState          GoalState         `json:"goal_state,omitempty"`
+	GoalSummary        string            `json:"goal_summary,omitempty"`
+	GoalUpdatedAt      time.Time         `json:"goal_updated_at,omitempty"`
 }
 
 type TranscriptUpdate struct {
@@ -89,6 +105,9 @@ type TranscriptUpdate struct {
 	LastBashCommand       string
 	Error                 string
 	UpdatedAt             time.Time
+	GoalState             GoalState
+	GoalSummary           string
+	GoalUpdatedAt         time.Time
 }
 
 type NotificationKind string

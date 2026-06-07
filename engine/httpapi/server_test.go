@@ -98,6 +98,21 @@ func TestSessionContinueEndpointFallsBackToDefaultContinueText(t *testing.T) {
 	}
 }
 
+func TestClassifyOpenReasonDoesNotTreatApprovalMentionsAsApproval(t *testing.T) {
+	message := `现在 GUI/LED 读的是 server 的字段：
+
+- needs_approval == true
+- open_reason == "approval"
+
+如果 server 没把状态归一好，GUI 这边就只能猜。`
+	if got := classifyOpenReason(message); got != "followup" {
+		t.Fatalf("expected followup for explanatory approval text, got %q", got)
+	}
+	if got := classifyOpenReason("Approval required before editing billing rules"); got != "approval" {
+		t.Fatalf("expected explicit approval request, got %q", got)
+	}
+}
+
 func newAttentionStore(t *testing.T) *store.Store {
 	t.Helper()
 	st := store.New(30*time.Second, 0, log.New(io.Discard, "", 0))

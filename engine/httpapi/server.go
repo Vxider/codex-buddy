@@ -63,6 +63,9 @@ type publicSession struct {
 	ContinueAction  *publicSessionAction `json:"continue_action,omitempty"`
 	CanClose        bool                 `json:"can_close"`
 	CloseAction     *publicSessionAction `json:"close_action,omitempty"`
+	GoalState       model.GoalState      `json:"goal_state,omitempty"`
+	GoalSummary     string               `json:"goal_summary,omitempty"`
+	GoalUpdatedAt   time.Time            `json:"goal_updated_at,omitempty"`
 }
 
 type publicSessionAction struct {
@@ -78,6 +81,9 @@ type publicStatus struct {
 	OverallStateDetail string          `json:"overall_state_detail,omitempty"`
 	SessionsCount      int             `json:"sessions_count"`
 	Sessions           []publicSession `json:"sessions"`
+	GoalState          model.GoalState `json:"goal_state,omitempty"`
+	GoalSummary        string          `json:"goal_summary,omitempty"`
+	GoalUpdatedAt      time.Time       `json:"goal_updated_at,omitempty"`
 }
 
 type publicNotification struct {
@@ -398,6 +404,9 @@ func (s *Server) publicStatus(snapshot model.StatusSnapshot) publicStatus {
 		OverallStateDetail: snapshot.OverallStateDetail,
 		SessionsCount:      len(snapshot.Sessions),
 		Sessions:           s.publicSessions(snapshot.Sessions, notifications, titles),
+		GoalState:          snapshot.GoalState,
+		GoalSummary:        snapshot.GoalSummary,
+		GoalUpdatedAt:      snapshot.GoalUpdatedAt,
 	}
 }
 
@@ -437,6 +446,9 @@ func (s *Server) publicSession(session model.SessionSnapshot, notification model
 		TmuxSession:     strings.TrimSpace(session.TmuxSession),
 		TmuxWindow:      strings.TrimSpace(session.TmuxWindow),
 		TmuxPane:        strings.TrimSpace(session.TmuxPane),
+		GoalState:       session.GoalState,
+		GoalSummary:     session.GoalSummary,
+		GoalUpdatedAt:   session.GoalUpdatedAt,
 	}
 
 	if item.State == model.StateOpen && openText != "" {
@@ -769,21 +781,20 @@ func needsApprovalFromMessage(message string) bool {
 
 	approvalMarkers := []string{
 		"approval required",
-		"approve",
-		"approval",
 		"need approval",
+		"needs approval",
 		"need confirmation",
-		"confirm ",
+		"needs confirmation",
 		"confirmation",
-		"waiting for",
 		"before overwriting",
 		"before editing",
 		"before deleting",
 		"before proceeding",
 		"before continuing",
-		"continue after",
 		"please confirm",
 		"please approve",
+		"permissionrequest",
+		"permission request",
 		"请确认",
 		"请批准",
 		"等待你确认",

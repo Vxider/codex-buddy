@@ -188,6 +188,15 @@ func (s *Store) ApplyTranscriptUpdate(update model.TranscriptUpdate) model.Statu
 	if update.Error != "" {
 		session.LastError = preview(update.Error)
 	}
+	if update.GoalState != "" {
+		session.GoalState = update.GoalState
+	}
+	if update.GoalSummary != "" {
+		session.GoalSummary = preview(update.GoalSummary)
+	}
+	if !update.GoalUpdatedAt.IsZero() {
+		session.GoalUpdatedAt = update.GoalUpdatedAt
+	}
 	if session.State == model.StateIdle && needsAttentionFromMessage(session.LastAssistantMessage) {
 		session.State = model.StateAttention
 		session.StateDetail = string(model.StateAttention)
@@ -455,6 +464,9 @@ func (s *Store) snapshotLocked() model.StatusSnapshot {
 	snapshot.ActiveSessionID = active.SessionID
 	snapshot.OverallState = active.State
 	snapshot.OverallStateDetail = active.StateDetail
+	snapshot.GoalState = active.GoalState
+	snapshot.GoalSummary = active.GoalSummary
+	snapshot.GoalUpdatedAt = active.GoalUpdatedAt
 	return snapshot
 }
 
@@ -524,19 +536,16 @@ func needsAttentionFromMessage(message string) bool {
 
 	attentionMarkers := []string{
 		"approval required",
-		"approve",
-		"approval",
 		"need approval",
+		"needs approval",
 		"need confirmation",
-		"confirm ",
+		"needs confirmation",
 		"confirmation",
-		"waiting for",
 		"before overwriting",
 		"before editing",
 		"before deleting",
 		"before proceeding",
 		"before continuing",
-		"continue after",
 		"would you like me to",
 		"if you'd like me to",
 		"if you'd like, i can",
@@ -545,6 +554,8 @@ func needsAttentionFromMessage(message string) bool {
 		"let me know if you want",
 		"please confirm",
 		"please approve",
+		"permissionrequest",
+		"permission request",
 		"如果你愿意",
 		"如果你希望",
 		"如果你想",
