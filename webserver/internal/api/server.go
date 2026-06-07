@@ -73,11 +73,21 @@ type publicSessionAction struct {
 }
 
 type publicStatus struct {
-	ServerTime         time.Time       `json:"server_time"`
-	OverallState       model.State     `json:"overall_state"`
-	OverallStateDetail string          `json:"overall_state_detail,omitempty"`
-	SessionsCount      int             `json:"sessions_count"`
-	Sessions           []publicSession `json:"sessions"`
+	ServerTime         time.Time         `json:"server_time"`
+	OverallState       model.State       `json:"overall_state"`
+	OverallStateDetail string            `json:"overall_state_detail,omitempty"`
+	ActiveSessionID    string            `json:"active_session_id,omitempty"`
+	SessionsCount      int               `json:"sessions_count"`
+	Sessions           []publicSession   `json:"sessions"`
+	ServerState        publicServerState `json:"server_state"`
+}
+
+type publicServerState struct {
+	State           model.State `json:"state"`
+	StateDetail     string      `json:"state_detail,omitempty"`
+	ActiveSessionID string      `json:"active_session_id,omitempty"`
+	SessionsCount   int         `json:"sessions_count"`
+	LastUpdatedAt   *time.Time  `json:"last_updated_at,omitempty"`
 }
 
 type publicNotification struct {
@@ -391,13 +401,16 @@ func (s *Server) decorateSnapshot(snapshot model.StatusSnapshot) model.StatusSna
 func (s *Server) publicStatus(snapshot model.StatusSnapshot) publicStatus {
 	notifications := s.notificationIndex()
 	titles := sessionTitles(snapshot.Sessions)
+	sessions := s.publicSessions(snapshot.Sessions, notifications, titles)
 
 	return publicStatus{
 		ServerTime:         snapshot.ServerTime,
 		OverallState:       publicCodexState(snapshot.OverallState),
 		OverallStateDetail: snapshot.OverallStateDetail,
+		ActiveSessionID:    snapshot.ActiveSessionID,
 		SessionsCount:      len(snapshot.Sessions),
-		Sessions:           s.publicSessions(snapshot.Sessions, notifications, titles),
+		Sessions:           sessions,
+		ServerState:        serverState(snapshot),
 	}
 }
 
@@ -482,6 +495,22 @@ func (s *Server) publicSession(session model.SessionSnapshot, notification model
 	}
 
 	return item
+}
+
+func serverState(snapshot model.StatusSnapshot) publicServerState {
+	state := publicServerState{
+		State:           snapshot.OverallState,
+		StateDetail:     snapshot.OverallStateDetail,
+		ActiveSessionID: snapshot.ActiveSessionID,
+		SessionsCount:   len(snapshot.Sessions),
+	}
+	for _, session := range snapshot.Sessions {
+		if state.LastUpdatedAt == nil || session.UpdatedAt.After(*state.LastUpdatedAt) {
+			updated := session.UpdatedAt
+			state.LastUpdatedAt = &updated
+		}
+	}
+	return state
 }
 
 func publicCodexState(state model.State) model.State {

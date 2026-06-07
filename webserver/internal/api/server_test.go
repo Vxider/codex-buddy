@@ -7,8 +7,8 @@ import (
 	"log"
 	"net/http"
 	"net/http/httptest"
-	"sync"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -258,6 +258,18 @@ func TestEmptyStatusIsIdleWhenServerIsReachable(t *testing.T) {
 	}
 	if out.SessionsCount != 0 {
 		t.Fatalf("expected zero sessions, got %d", out.SessionsCount)
+	}
+	if out.ServerState.State != model.StateIdle {
+		t.Fatalf("expected raw idle server state, got %s", out.ServerState.State)
+	}
+	if out.ServerState.StateDetail != string(model.StateIdle) {
+		t.Fatalf("expected raw idle server state detail, got %q", out.ServerState.StateDetail)
+	}
+	if out.ServerState.SessionsCount != 0 {
+		t.Fatalf("expected zero server state sessions, got %d", out.ServerState.SessionsCount)
+	}
+	if out.ServerState.LastUpdatedAt != nil {
+		t.Fatalf("expected no server last updated time, got %v", out.ServerState.LastUpdatedAt)
 	}
 }
 
@@ -731,6 +743,18 @@ func TestStatusErrorSummaryPrefersReadableCommandFailure(t *testing.T) {
 	}
 	if out.Sessions[0].Summary != "Command failed: go test ./webserver/..." {
 		t.Fatalf("unexpected error summary: %q", out.Sessions[0].Summary)
+	}
+	if out.ServerState.State != model.StateError {
+		t.Fatalf("expected raw error server state, got %s", out.ServerState.State)
+	}
+	if out.ServerState.StateDetail != string(model.StateError) {
+		t.Fatalf("expected raw error server state detail, got %q", out.ServerState.StateDetail)
+	}
+	if out.ServerState.ActiveSessionID != "sess-error" {
+		t.Fatalf("expected error active session, got %q", out.ServerState.ActiveSessionID)
+	}
+	if out.ServerState.LastUpdatedAt == nil || !out.ServerState.LastUpdatedAt.Equal(now.Add(2*time.Second)) {
+		t.Fatalf("unexpected server last updated time: %v", out.ServerState.LastUpdatedAt)
 	}
 }
 
