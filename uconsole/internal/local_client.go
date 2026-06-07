@@ -40,7 +40,7 @@ func NewLocalClient(cfg config.Config, runtime *engine.Runtime) *LocalClient {
 		runtime.Store(),
 		runtime.TranscriptManager(),
 		runtime.ContinueExecutor(),
-		runtime.SessionOpenChecker(),
+		nil,
 		nil,
 	)
 	return &LocalClient{

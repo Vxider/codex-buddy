@@ -614,7 +614,7 @@ func newLocalCLIClient(cfg config.Config, runtime *engine.Runtime) *localClient 
 		runtime.Store(),
 		runtime.TranscriptManager(),
 		runtime.ContinueExecutor(),
-		runtime.SessionOpenChecker(),
+		nil,
 		nil,
 	)
 	return &localClient{handler: server.Handler(), baseURL: "http://local"}

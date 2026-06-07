@@ -65,7 +65,7 @@ func (s *EmbeddedServer) Start(ctx context.Context, cfg config.Config) error {
 		s.runtime.Store(),
 		s.runtime.TranscriptManager(),
 		s.runtime.ContinueExecutor(),
-		s.runtime.SessionOpenChecker(),
+		nil,
 		s.logger,
 	)
 

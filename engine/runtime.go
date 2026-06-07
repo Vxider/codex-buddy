@@ -7,7 +7,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/vxider/codex-buddy/engine/bootstrap"
 	"github.com/vxider/codex-buddy/engine/control"
 	"github.com/vxider/codex-buddy/engine/store"
 	"github.com/vxider/codex-buddy/engine/transcript"
@@ -21,7 +20,6 @@ type Runtime struct {
 	store        *store.Store
 	transcript   *transcript.Manager
 	control      control.ContinueExecutor
-	openCheck    control.SessionOpenChecker
 	pollInterval time.Duration
 
 	mu             sync.Mutex
@@ -45,7 +43,6 @@ func NewRuntime(cfg config.Config, logger *log.Logger) *Runtime {
 		logger:         logger,
 		store:          sessionStore,
 		control:        control.NewTmuxContinueExecutor(logger),
-		openCheck:      control.NewTmuxSessionOpenChecker(logger),
 		pollInterval:   time.Duration(cfg.Transcript.PollIntervalMS) * time.Millisecond,
 		recoveredPaths: make(map[string]string),
 	}
@@ -70,8 +67,9 @@ func (r *Runtime) Start(ctx context.Context) {
 		ctx = context.Background()
 	}
 	r.startOnce.Do(func() {
-		r.rescan()
-		go r.runScanLoop(ctx)
+		if r.logger != nil {
+			r.logger.Printf("runtime using Codex hook state; tmux session discovery is disabled")
+		}
 	})
 }
 
@@ -88,7 +86,7 @@ func (r *Runtime) ContinueExecutor() control.ContinueExecutor {
 }
 
 func (r *Runtime) SessionOpenChecker() control.SessionOpenChecker {
-	return r.openCheck
+	return nil
 }
 
 func (r *Runtime) Snapshot() model.StatusSnapshot {
@@ -116,9 +114,6 @@ func (r *Runtime) ContinueNotification(id, token string) (model.NotificationSnap
 	if !ok {
 		return model.NotificationSnapshot{}, fmt.Errorf("notification is no longer actionable")
 	}
-	if r.openCheck != nil && !r.openCheck.IsOpen(session) {
-		return model.NotificationSnapshot{}, fmt.Errorf("session is no longer open")
-	}
 	if err := r.control.Continue(session, model.ContinueCommandText); err != nil {
 		return model.NotificationSnapshot{}, err
 	}
@@ -141,9 +136,6 @@ func (r *Runtime) ContinueSession(sessionID string) (model.NotificationSnapshot,
 	if !ok {
 		return model.NotificationSnapshot{}, model.SessionSnapshot{}, fmt.Errorf("session continue is unavailable")
 	}
-	if r.openCheck != nil && !r.openCheck.IsOpen(session) {
-		return model.NotificationSnapshot{}, model.SessionSnapshot{}, fmt.Errorf("session is no longer open")
-	}
 	if err := r.control.Continue(session, model.ContinueCommandText); err != nil {
 		return model.NotificationSnapshot{}, model.SessionSnapshot{}, err
 	}
@@ -160,53 +152,6 @@ func (r *Runtime) ApplyIngest(req model.IngestRequest) model.StatusSnapshot {
 		r.ensureRecovered(req.Payload.SessionID, req.Payload.TranscriptPath)
 	}
 	return snapshot
-}
-
-func (r *Runtime) runScanLoop(ctx context.Context) {
-	ticker := time.NewTicker(r.pollInterval)
-	defer ticker.Stop()
-
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-ticker.C:
-			r.rescan()
-		}
-	}
-}
-
-func (r *Runtime) rescan() {
-	sessions, err := bootstrap.RecoverOpenSessions(r.logger)
-	if err != nil {
-		if r.logger != nil {
-			r.logger.Printf("runtime rescan failed: %v", err)
-		}
-		return
-	}
-
-	discovered := make([]store.DiscoverySession, 0, len(sessions))
-	for _, session := range sessions {
-		discovered = append(discovered, store.DiscoverySession{
-			SessionID:      session.SessionID,
-			TranscriptPath: session.TranscriptPath,
-			CWD:            session.CWD,
-			TmuxPane:       session.TmuxPane,
-			TmuxSession:    session.TmuxSession,
-			TmuxWindow:     session.TmuxWindow,
-		})
-		if session.TranscriptPath != "" {
-			r.ensureRecovered(session.SessionID, session.TranscriptPath)
-		}
-	}
-
-	removed, _ := r.store.ApplyDiscovery(discovered, time.Now().UTC())
-	for _, sessionID := range removed {
-		r.transcript.Remove(sessionID)
-		r.mu.Lock()
-		delete(r.recoveredPaths, sessionID)
-		r.mu.Unlock()
-	}
 }
 
 func (r *Runtime) ensureRecovered(sessionID, transcriptPath string) {

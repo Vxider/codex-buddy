@@ -226,11 +226,11 @@ func TestStoppedOpenSessionShowsFullAssistantReply(t *testing.T) {
 		t.Fatalf("expected one session, got %d", len(out.Sessions))
 	}
 	session := out.Sessions[0]
-	if session.State != model.StateOpen {
-		t.Fatalf("expected public open state, got %s", session.State)
+	if session.State != model.StateIdle {
+		t.Fatalf("expected public idle state, got %s", session.State)
 	}
-	if session.OpenSummary != fullReply {
-		t.Fatalf("expected full open summary, got %q", session.OpenSummary)
+	if !strings.Contains(session.Summary, "remaining work is operational") {
+		t.Fatalf("expected idle summary to preserve completion context, got %q", session.Summary)
 	}
 }
 
@@ -250,8 +250,8 @@ func TestEmptyStatusIsIdleWhenServerIsReachable(t *testing.T) {
 	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
 		t.Fatalf("decode status: %v", err)
 	}
-	if out.OverallState != model.StateOpen {
-		t.Fatalf("expected open overall state for reachable empty server, got %s", out.OverallState)
+	if out.OverallState != model.StateIdle {
+		t.Fatalf("expected idle overall state for reachable empty server, got %s", out.OverallState)
 	}
 	if out.OverallStateDetail != string(model.StateIdle) {
 		t.Fatalf("expected idle state detail, got %q", out.OverallStateDetail)
@@ -738,8 +738,8 @@ func TestStatusErrorSummaryPrefersReadableCommandFailure(t *testing.T) {
 	if len(out.Sessions) != 1 {
 		t.Fatalf("expected one session, got %d", len(out.Sessions))
 	}
-	if out.Sessions[0].State != model.StateOpen {
-		t.Fatalf("expected open state, got %s", out.Sessions[0].State)
+	if out.Sessions[0].State != model.StateError {
+		t.Fatalf("expected error state, got %s", out.Sessions[0].State)
 	}
 	if out.Sessions[0].Summary != "Command failed: go test ./webserver/..." {
 		t.Fatalf("unexpected error summary: %q", out.Sessions[0].Summary)
@@ -943,7 +943,7 @@ func TestSessionContinueEndpointFallsBackToLatestActionableNotification(t *testi
 	}
 }
 
-func TestStatusHidesSessionsThatAreNoLongerOpen(t *testing.T) {
+func TestStatusUsesHookSessionsWithoutTmuxOpenFiltering(t *testing.T) {
 	st := store.New(30*time.Second, 0, log.New(io.Discard, "", 0))
 	now := time.Date(2026, 4, 25, 9, 0, 0, 0, time.UTC)
 
@@ -990,18 +990,22 @@ func TestStatusHidesSessionsThatAreNoLongerOpen(t *testing.T) {
 	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
 		t.Fatalf("decode status: %v", err)
 	}
-	if out.SessionsCount != 1 {
-		t.Fatalf("expected one visible session, got %d", out.SessionsCount)
+	if out.SessionsCount != 2 {
+		t.Fatalf("expected both hook sessions, got %d", out.SessionsCount)
 	}
-	if len(out.Sessions) != 1 {
-		t.Fatalf("expected one visible session item, got %d", len(out.Sessions))
+	if len(out.Sessions) != 2 {
+		t.Fatalf("expected both hook session items, got %d", len(out.Sessions))
 	}
-	if out.Sessions[0].SessionID != "sess-visible" {
-		t.Fatalf("expected only visible session in list, got %q", out.Sessions[0].SessionID)
+	ids := map[string]bool{}
+	for _, session := range out.Sessions {
+		ids[session.SessionID] = true
+	}
+	if !ids["sess-hidden"] || !ids["sess-visible"] {
+		t.Fatalf("expected hook sessions to bypass tmux open filtering, got %#v", ids)
 	}
 }
 
-func TestNotificationsHideSessionsThatAreNoLongerOpen(t *testing.T) {
+func TestNotificationsUseHookSessionsWithoutTmuxOpenFiltering(t *testing.T) {
 	st := newAttentionStore(t)
 	server := NewServer(
 		config.Config{},
@@ -1028,12 +1032,12 @@ func TestNotificationsHideSessionsThatAreNoLongerOpen(t *testing.T) {
 	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
 		t.Fatalf("decode notifications: %v", err)
 	}
-	if len(out.Notifications) != 0 {
-		t.Fatalf("expected hidden session notifications to be filtered, got %d", len(out.Notifications))
+	if len(out.Notifications) != 1 {
+		t.Fatalf("expected hook session notification to remain visible, got %d", len(out.Notifications))
 	}
 }
 
-func TestHiddenSessionReturnsNotFound(t *testing.T) {
+func TestHookSessionDetailBypassesTmuxOpenFiltering(t *testing.T) {
 	st := newAttentionStore(t)
 	server := NewServer(
 		config.Config{},
@@ -1050,8 +1054,8 @@ func TestHiddenSessionReturnsNotFound(t *testing.T) {
 	resp := httptest.NewRecorder()
 	server.Handler().ServeHTTP(resp, req)
 
-	if resp.Code != http.StatusNotFound {
-		t.Fatalf("expected 404 for hidden session, got %d", resp.Code)
+	if resp.Code != http.StatusOK {
+		t.Fatalf("expected 200 for hook session regardless of tmux open state, got %d", resp.Code)
 	}
 }
 

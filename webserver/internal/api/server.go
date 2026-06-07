@@ -518,7 +518,7 @@ func publicCodexState(state model.State) model.State {
 	case model.StateRun, model.StateRunning, model.StateRunningBash:
 		return model.StateRun
 	default:
-		return model.StateOpen
+		return state
 	}
 }
 
@@ -707,10 +707,7 @@ func (s *Server) visibleNotifications() []model.NotificationSnapshot {
 }
 
 func (s *Server) isSessionVisible(session model.SessionSnapshot) bool {
-	if s.openCheck == nil {
-		return true
-	}
-	return s.openCheck.IsOpen(session)
+	return strings.TrimSpace(session.SessionID) != ""
 }
 
 func shortSessionID(value string) string {

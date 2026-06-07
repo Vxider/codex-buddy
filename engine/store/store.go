@@ -197,10 +197,18 @@ func (s *Store) ApplyTranscriptUpdate(update model.TranscriptUpdate) model.Statu
 	if !update.GoalUpdatedAt.IsZero() {
 		session.GoalUpdatedAt = update.GoalUpdatedAt
 	}
-	if session.State == model.StateIdle && needsAttentionFromMessage(session.LastAssistantMessage) {
-		session.State = model.StateAttention
-		session.StateDetail = string(model.StateAttention)
-		session.CurrentAttentionDeadline = s.attentionDeadline()
+	if update.LastAssistantMessage != "" {
+		if needsAttentionFromMessage(session.LastAssistantMessage) {
+			if session.State == model.StateIdle || session.State == model.StateAttention {
+				session.State = model.StateAttention
+				session.StateDetail = string(model.StateAttention)
+				session.CurrentAttentionDeadline = s.attentionDeadline()
+			}
+		} else if session.State == model.StateAttention {
+			session.State = model.StateIdle
+			session.StateDetail = string(model.StateIdle)
+			session.CurrentAttentionDeadline = time.Time{}
+		}
 	}
 
 	s.appendRecentEventLocked(model.RecentEvent{
