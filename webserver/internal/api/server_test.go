@@ -183,6 +183,58 @@ func TestOpenSummaryPreservesFullAssistantReply(t *testing.T) {
 	}
 }
 
+func TestStatusMarksRequireEscalatedPreToolUseAsApproval(t *testing.T) {
+	st := store.New(30*time.Second, 0, log.New(io.Discard, "", 0))
+	now := time.Date(2026, 6, 7, 14, 17, 0, 0, time.UTC)
+
+	st.ApplyIngest(model.IngestRequest{
+		EventName:  "pre-tool-use",
+		ReceivedAt: now,
+		Payload: model.HookPayload{
+			SessionID: "sess-escalated",
+			CWD:       "/repo/flashai",
+			ToolName:  "Bash",
+			TmuxPane:  "%11",
+			ToolInput: map[string]any{
+				"cmd":                 "node -e 'query db'",
+				"sandbox_permissions": "require_escalated",
+				"justification":       "需要连接本机 Postgres 确认语料包数据库记录已经改为“中国专利数据”，是否允许执行？",
+			},
+		},
+	})
+
+	server := NewServer(config.Config{}, st, nil, &stubContinueExecutor{}, nil, log.New(io.Discard, "", 0))
+	req := httptest.NewRequest(http.MethodGet, "/v1/status", nil)
+	resp := httptest.NewRecorder()
+	server.Handler().ServeHTTP(resp, req)
+
+	if resp.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", resp.Code)
+	}
+
+	var out publicStatus
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		t.Fatalf("decode status: %v", err)
+	}
+	if out.OverallState != model.StateOpen {
+		t.Fatalf("expected open overall state, got %s", out.OverallState)
+	}
+	if len(out.Sessions) != 1 {
+		t.Fatalf("expected one session, got %d", len(out.Sessions))
+	}
+
+	session := out.Sessions[0]
+	if !session.NeedsApproval {
+		t.Fatalf("expected approval flag")
+	}
+	if session.OpenReason != "approval" {
+		t.Fatalf("expected approval open reason, got %q", session.OpenReason)
+	}
+	if !strings.Contains(session.OpenSummary, "Postgres") {
+		t.Fatalf("expected approval justification in open summary, got %q", session.OpenSummary)
+	}
+}
+
 func TestStoppedOpenSessionShowsFullAssistantReply(t *testing.T) {
 	st := store.New(30*time.Second, 0, log.New(io.Discard, "", 0))
 	now := time.Date(2026, 4, 26, 9, 0, 0, 0, time.UTC)

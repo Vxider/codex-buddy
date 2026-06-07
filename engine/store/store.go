@@ -108,8 +108,16 @@ func (s *Store) ApplyIngest(req model.IngestRequest) model.StatusSnapshot {
 		session.CurrentAttentionDeadline = time.Time{}
 	case "pretooluse":
 		if strings.EqualFold(req.Payload.ToolName, "Bash") || strings.EqualFold(req.EventName, "pre-tool-use") {
-			session.State = model.StateRunningBash
-			session.StateDetail = string(model.StateRunningBash)
+			if approvalSummary := approvalRequestSummaryFromToolInput(req.Payload.ToolInput); approvalSummary != "" {
+				session.LastAssistantMessageFull = approvalSummary
+				session.LastAssistantMessage = previewAssistant(approvalSummary)
+				session.State = model.StateAttention
+				session.StateDetail = string(model.StateAttention)
+				session.CurrentAttentionDeadline = s.attentionDeadline()
+			} else {
+				session.State = model.StateRunningBash
+				session.StateDetail = string(model.StateRunningBash)
+			}
 			if command := previewAny(req.Payload.ToolInput); command != "" {
 				session.LastBashCommand = command
 			}
@@ -865,6 +873,91 @@ func previewAny(value any) string {
 		}
 		return preview(string(blob))
 	}
+}
+
+func approvalRequestSummaryFromToolInput(value any) string {
+	toolInput, ok := normalizeToolInputMap(value)
+	if !ok {
+		return ""
+	}
+
+	if !toolInputRequiresApproval(toolInput) {
+		return ""
+	}
+
+	reason := firstStringField(toolInput, "justification", "reason", "approval_reason", "approvalReason")
+	if reason == "" {
+		reason = "Codex needs approval before running this command."
+	}
+	return "Approval required: " + strings.TrimSpace(reason)
+}
+
+func normalizeToolInputMap(value any) (map[string]any, bool) {
+	switch typed := value.(type) {
+	case map[string]any:
+		return typed, true
+	case map[string]string:
+		out := make(map[string]any, len(typed))
+		for key, item := range typed {
+			out[key] = item
+		}
+		return out, true
+	case string:
+		var decoded map[string]any
+		if err := json.Unmarshal([]byte(typed), &decoded); err != nil {
+			return nil, false
+		}
+		return decoded, true
+	default:
+		blob, err := json.Marshal(typed)
+		if err != nil {
+			return nil, false
+		}
+		var decoded map[string]any
+		if err := json.Unmarshal(blob, &decoded); err != nil {
+			return nil, false
+		}
+		return decoded, true
+	}
+}
+
+func toolInputRequiresApproval(toolInput map[string]any) bool {
+	for _, key := range []string{"sandbox_permissions", "sandboxPermissions", "approval", "approval_policy", "approvalPolicy"} {
+		if strings.Contains(strings.ToLower(firstStringField(toolInput, key)), "require_escalated") {
+			return true
+		}
+	}
+	return false
+}
+
+func firstStringField(values map[string]any, keys ...string) string {
+	for _, key := range keys {
+		value, ok := values[key]
+		if !ok {
+			continue
+		}
+		switch typed := value.(type) {
+		case string:
+			if trimmed := strings.TrimSpace(typed); trimmed != "" {
+				return trimmed
+			}
+		case []string:
+			for _, item := range typed {
+				if trimmed := strings.TrimSpace(item); trimmed != "" {
+					return trimmed
+				}
+			}
+		case []any:
+			for _, item := range typed {
+				if text, ok := item.(string); ok {
+					if trimmed := strings.TrimSpace(text); trimmed != "" {
+						return trimmed
+					}
+				}
+			}
+		}
+	}
+	return ""
 }
 
 func coalesce(values ...string) string {

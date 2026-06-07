@@ -48,6 +48,47 @@ func TestApplyIngestTransitions(t *testing.T) {
 	}
 }
 
+func TestPreToolUseRequireEscalatedBecomesApprovalAttention(t *testing.T) {
+	st := New(30*time.Second, 0, log.New(io.Discard, "", 0))
+	now := time.Now().UTC()
+
+	snapshot := st.ApplyIngest(model.IngestRequest{
+		EventName:  "pre-tool-use",
+		ReceivedAt: now,
+		Payload: model.HookPayload{
+			SessionID: "sess-approval",
+			ToolName:  "Bash",
+			TmuxPane:  "%11",
+			ToolInput: map[string]any{
+				"cmd":                 "node -e 'query db'",
+				"sandbox_permissions": "require_escalated",
+				"justification":       "需要连接本机 Postgres 确认语料包数据库记录已经改为“中国专利数据”，是否允许执行？",
+			},
+		},
+	})
+
+	if snapshot.OverallState != model.StateAttention {
+		t.Fatalf("expected approval pre-tool-use to become attention, got %s", snapshot.OverallState)
+	}
+
+	session, ok := st.Session("sess-approval")
+	if !ok {
+		t.Fatalf("expected session")
+	}
+	if session.State != model.StateAttention {
+		t.Fatalf("expected session attention, got %s", session.State)
+	}
+	if !strings.Contains(session.LastAssistantMessage, "Approval required") {
+		t.Fatalf("expected approval summary, got %q", session.LastAssistantMessage)
+	}
+	if !strings.Contains(session.LastAssistantMessageFull, "Postgres") {
+		t.Fatalf("expected justification in full approval summary, got %q", session.LastAssistantMessageFull)
+	}
+	if session.CurrentAttentionDeadline.IsZero() {
+		t.Fatalf("expected attention deadline")
+	}
+}
+
 func TestEmptyStoreSnapshotStaysIdle(t *testing.T) {
 	st := New(0, 0, log.New(io.Discard, "", 0))
 
