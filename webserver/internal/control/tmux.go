@@ -152,3 +152,10 @@ func tmuxTargetMissing(output string) bool {
 	}
 	return false
 }
+
+func IsTmuxTargetMissingError(err error) bool {
+	if err == nil {
+		return false
+	}
+	return tmuxTargetMissing(err.Error())
+}

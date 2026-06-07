@@ -227,6 +227,33 @@ func (s *Store) Session(sessionID string) (model.SessionSnapshot, bool) {
 	return snap, true
 }
 
+func (s *Store) RemoveSession(sessionID string) (model.SessionSnapshot, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	session, ok := s.sessions[sessionID]
+	if !ok {
+		return model.SessionSnapshot{}, false
+	}
+	snap := s.deriveSession(session.SessionSnapshot)
+	delete(s.sessions, sessionID)
+	for id, notification := range s.notifications {
+		if notification.SessionID == sessionID {
+			delete(s.notifications, id)
+		}
+	}
+	s.appendRecentEventLocked(model.RecentEvent{
+		Time:      time.Now().UTC(),
+		Source:    "api",
+		SessionID: sessionID,
+		EventName: "session_removed",
+		Summary:   "session removed",
+	})
+	snapshot := s.snapshotLocked()
+	s.broadcastLocked(snapshot)
+	return snap, true
+}
+
 func (s *Store) Sessions() []model.SessionSnapshot {
 	s.mu.RLock()
 	defer s.mu.RUnlock()

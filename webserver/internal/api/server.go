@@ -619,27 +619,34 @@ func (s *Server) handleSessionClose(w http.ResponseWriter, r *http.Request, sess
 		return
 	}
 
-	closer, ok := s.control.(control.SessionCloser)
-	if !ok || closer == nil {
-		http.Error(w, "close action is not configured", http.StatusNotImplemented)
-		return
-	}
-
 	session, ok := s.store.Session(sessionID)
 	if !ok || !s.isSessionVisible(session) {
 		http.NotFound(w, r)
 		return
 	}
 
-	if err := closer.Close(session); err != nil {
-		http.Error(w, fmt.Sprintf("close failed: %v", err), http.StatusBadGateway)
+	message := "closed"
+	closer, ok := s.control.(control.SessionCloser)
+	if ok && closer != nil && strings.TrimSpace(session.TmuxPane) != "" {
+		if err := closer.Close(session); err != nil {
+			if !control.IsTmuxTargetMissingError(err) {
+				http.Error(w, fmt.Sprintf("close failed: %v", err), http.StatusBadGateway)
+				return
+			}
+			message = "removed stale session"
+		}
+	} else if strings.TrimSpace(session.TmuxPane) != "" {
+		http.Error(w, "close action is not configured", http.StatusNotImplemented)
 		return
+	} else {
+		message = "removed session"
 	}
+	removed, _ := s.store.RemoveSession(sessionID)
 
 	writeJSON(w, http.StatusOK, map[string]any{
 		"ok":      true,
-		"message": "close sent",
-		"session": s.publicSession(session, model.NotificationSnapshot{}, sessionTitles([]model.SessionSnapshot{session})[session.SessionID]),
+		"message": message,
+		"session": s.publicSession(removed, model.NotificationSnapshot{}, sessionTitles([]model.SessionSnapshot{removed})[session.SessionID]),
 		"status":  s.publicStatus(s.decorateSnapshot(s.store.Snapshot())),
 	})
 }
