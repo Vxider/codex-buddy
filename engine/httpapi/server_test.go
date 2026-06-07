@@ -139,7 +139,7 @@ func newAttentionStore(t *testing.T) *store.Store {
 		ReceivedAt: now.Add(2 * time.Second),
 		Payload: model.HookPayload{
 			SessionID:            "sess-1",
-			LastAssistantMessage: "Need confirmation before overwriting files",
+			LastAssistantMessage: "If you want, I can continue with the next sidebar refactor step",
 			TmuxPane:             "%12",
 		},
 	})

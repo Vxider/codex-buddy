@@ -32,7 +32,7 @@ func TestApplyIngestTransitions(t *testing.T) {
 		ReceivedAt: now.Add(time.Second),
 		Payload: model.HookPayload{
 			SessionID:            "sess-1",
-			LastAssistantMessage: "Need confirmation before overwriting files",
+			LastAssistantMessage: "If you want, I can continue with the next sidebar refactor step",
 		},
 	})
 	if snapshot.OverallState != model.StateAttention {
@@ -215,6 +215,25 @@ func TestChineseFollowUpOfferStopBecomesAttention(t *testing.T) {
 	}
 	if session.State != model.StateAttention {
 		t.Fatalf("expected attention session, got %s", session.State)
+	}
+}
+
+func TestStopQuestionWithoutFollowUpOfferStaysIdle(t *testing.T) {
+	st := New(0, 0, log.New(io.Discard, "", 0))
+	now := time.Now().UTC()
+
+	snapshot := st.ApplyIngest(model.IngestRequest{
+		EventName:  "stop",
+		ReceivedAt: now,
+		Payload: model.HookPayload{
+			SessionID:            "sess-question",
+			TmuxPane:             "%3",
+			LastAssistantMessage: "测试完成。你还有别的问题吗？",
+		},
+	})
+
+	if snapshot.OverallState != model.StateIdle {
+		t.Fatalf("expected generic question stop to stay idle, got %s", snapshot.OverallState)
 	}
 }
 

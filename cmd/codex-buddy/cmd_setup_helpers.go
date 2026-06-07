@@ -102,7 +102,6 @@ matcher = "Bash"
 hooks = [{ type = "command", command = %s }]
 
 [[hooks.PermissionRequest]]
-matcher = "Bash"
 hooks = [{ type = "command", command = %s, statusMessage = "codex-buddy permission-request" }]
 
 [[hooks.PostToolUse]]

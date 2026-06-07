@@ -50,6 +50,52 @@ func TestTranscriptCompletionClearsAttention(t *testing.T) {
 	}
 }
 
+func TestStopFollowUpOfferBecomesAttention(t *testing.T) {
+	st := New(0, 0, log.New(io.Discard, "", 0))
+	now := time.Now().UTC()
+
+	snapshot := st.ApplyIngest(model.IngestRequest{
+		EventName:  "stop",
+		ReceivedAt: now,
+		Payload: model.HookPayload{
+			SessionID:            "sess-followup",
+			TmuxPane:             "%2",
+			LastAssistantMessage: "如果你愿意，我下一步可以继续帮你把剩下的 E2E 失败用例收口。",
+		},
+	})
+
+	if snapshot.OverallState != model.StateAttention {
+		t.Fatalf("expected follow-up stop to become attention, got %s", snapshot.OverallState)
+	}
+
+	session, ok := st.Session("sess-followup")
+	if !ok {
+		t.Fatalf("expected session")
+	}
+	if session.State != model.StateAttention {
+		t.Fatalf("expected attention session, got %s", session.State)
+	}
+}
+
+func TestStopQuestionWithoutFollowUpOfferStaysIdle(t *testing.T) {
+	st := New(0, 0, log.New(io.Discard, "", 0))
+	now := time.Now().UTC()
+
+	snapshot := st.ApplyIngest(model.IngestRequest{
+		EventName:  "stop",
+		ReceivedAt: now,
+		Payload: model.HookPayload{
+			SessionID:            "sess-question",
+			TmuxPane:             "%3",
+			LastAssistantMessage: "测试完成。你还有别的问题吗？",
+		},
+	})
+
+	if snapshot.OverallState != model.StateIdle {
+		t.Fatalf("expected generic question stop to stay idle, got %s", snapshot.OverallState)
+	}
+}
+
 func TestPreToolUseRequireEscalatedBecomesApprovalAttention(t *testing.T) {
 	st := New(30*time.Second, 0, log.New(io.Discard, "", 0))
 	now := time.Now().UTC()

@@ -78,29 +78,29 @@ func TestStatusIncludesOpenSummaryAndContinueAction(t *testing.T) {
 	if session.MicroTitle != "sidebar" {
 		t.Fatalf("unexpected micro title: %q", session.MicroTitle)
 	}
-	if session.OpenSummary != "Need confirmation before overwriting files" {
+	if session.OpenSummary != "If you want, I can continue with the next sidebar refactor step" {
 		t.Fatalf("unexpected open summary: %q", session.OpenSummary)
 	}
-	if session.OpenMarkdown != "Need confirmation before overwriting files" {
+	if session.OpenMarkdown != "If you want, I can continue with the next sidebar refactor step" {
 		t.Fatalf("unexpected open markdown: %q", session.OpenMarkdown)
 	}
-	if !strings.Contains(session.OpenHTML, "<p>Need confirmation before overwriting files</p>") {
+	if !strings.Contains(session.OpenHTML, "<p>If you want, I can continue with the next sidebar refactor step</p>") {
 		t.Fatalf("expected rendered open html, got %q", session.OpenHTML)
 	}
-	if session.CompactOpen != "Need confirmation before overwriting files" {
+	if session.CompactOpen != "If you want, I can continue with the next sidebar refactor step" {
 		t.Fatalf("unexpected compact open summary: %q", session.CompactOpen)
 	}
-	if session.MicroOpen != "Need confirmation before overwriting files" {
+	if session.MicroOpen != "If you want, I can continue with the next s…" {
 		t.Fatalf("unexpected micro open summary: %q", session.MicroOpen)
 	}
 	if !session.NeedsOpen {
 		t.Fatalf("expected session to need open follow-up")
 	}
-	if !session.NeedsApproval {
-		t.Fatalf("expected approval state to be visible")
+	if session.NeedsApproval {
+		t.Fatalf("expected follow-up state to stay separate from approval")
 	}
-	if session.OpenReason != "approval" {
-		t.Fatalf("expected approval open reason, got %q", session.OpenReason)
+	if session.OpenReason != "followup" {
+		t.Fatalf("expected followup open reason, got %q", session.OpenReason)
 	}
 	if !session.CanContinue {
 		t.Fatalf("expected session to be continuable")
@@ -479,12 +479,16 @@ func TestStatusTitleDoesNotReuseAssistantSummary(t *testing.T) {
 		},
 	})
 	st.ApplyIngest(model.IngestRequest{
-		EventName:  "stop",
+		EventName:  "permission-request",
 		ReceivedAt: now.Add(time.Second),
 		Payload: model.HookPayload{
-			SessionID:            "sess-dup",
-			LastAssistantMessage: "Approval required before editing billing rules",
-			TmuxPane:             "%8",
+			SessionID: "sess-dup",
+			ToolName:  "Bash",
+			TmuxPane:  "%8",
+			ToolInput: map[string]any{
+				"command":     "python scripts/update_billing_rules.py",
+				"description": "Approval required before editing billing rules",
+			},
 		},
 	})
 
@@ -515,7 +519,7 @@ func TestStatusTitleDoesNotReuseAssistantSummary(t *testing.T) {
 	if session.MicroTitle != "payments" {
 		t.Fatalf("expected micro cwd-derived title, got %q", session.MicroTitle)
 	}
-	if session.OpenSummary != "Approval required before editing billing rules" {
+	if session.OpenSummary != "Approval required: Approval required before editing billing rules" {
 		t.Fatalf("unexpected open summary: %q", session.OpenSummary)
 	}
 	if !session.NeedsApproval {
@@ -689,12 +693,16 @@ func TestStatusIncludesCompactMobileFields(t *testing.T) {
 		},
 	})
 	st.ApplyIngest(model.IngestRequest{
-		EventName:  "stop",
+		EventName:  "permission-request",
 		ReceivedAt: now.Add(2 * time.Second),
 		Payload: model.HookPayload{
-			SessionID:            "sess-mobile",
-			LastAssistantMessage: "I reviewed the flow and found the safest next step.\n\nApproval required before overwriting billing copy and continuing the refactor.",
-			TmuxPane:             "%9",
+			SessionID: "sess-mobile",
+			ToolName:  "Bash",
+			TmuxPane:  "%9",
+			ToolInput: map[string]any{
+				"command":     "python scripts/update_billing_copy.py",
+				"description": "I reviewed the flow and found the safest next step.\n\nApproval required before overwriting billing copy and continuing the refactor.",
+			},
 		},
 	})
 
@@ -993,7 +1001,7 @@ func TestSessionContinueEndpointFallsBackToLatestActionableNotification(t *testi
 		ReceivedAt: now.Add(2 * time.Second),
 		Payload: model.HookPayload{
 			SessionID:            "sess-1",
-			LastAssistantMessage: "Need confirmation before overwriting files",
+			LastAssistantMessage: "If you want, I can continue with the next sidebar refactor step",
 			TmuxPane:             "%12",
 		},
 	})
@@ -1017,7 +1025,7 @@ func TestSessionContinueEndpointFallsBackToLatestActionableNotification(t *testi
 		ReceivedAt: now.Add(4 * time.Second),
 		Payload: model.HookPayload{
 			SessionID:            "sess-1",
-			LastAssistantMessage: "Ready to continue after confirmation",
+			LastAssistantMessage: "If you want, I can continue with the next sidebar cleanup pass",
 			TmuxPane:             "%12",
 		},
 	})
@@ -1203,7 +1211,7 @@ func newAttentionStore(t *testing.T) *store.Store {
 		ReceivedAt: now.Add(2 * time.Second),
 		Payload: model.HookPayload{
 			SessionID:            "sess-1",
-			LastAssistantMessage: "Need confirmation before overwriting files",
+			LastAssistantMessage: "If you want, I can continue with the next sidebar refactor step",
 			TmuxPane:             "%12",
 		},
 	})

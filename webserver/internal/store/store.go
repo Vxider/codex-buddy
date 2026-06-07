@@ -198,7 +198,7 @@ func (s *Store) ApplyTranscriptUpdate(update model.TranscriptUpdate) model.Statu
 		session.LastError = preview(update.Error)
 	}
 	if update.LastAssistantMessage != "" {
-		if needsAttentionFromMessage(session.LastAssistantMessage) {
+		if stopMessageRequestsFollowUp(session.LastAssistantMessage) {
 			if session.State == model.StateIdle || session.State == model.StateAttention {
 				session.State = model.StateAttention
 				session.StateDetail = string(model.StateAttention)
@@ -492,70 +492,61 @@ func stopState(session *sessionState) model.State {
 	if session == nil {
 		return model.StateIdle
 	}
-	if needsAttentionFromMessage(session.LastAssistantMessage) {
+	if stopMessageRequestsFollowUp(session.LastAssistantMessage) {
 		return model.StateAttention
 	}
 	return model.StateIdle
 }
 
-func needsAttentionFromMessage(message string) bool {
+func stopMessageRequestsFollowUp(message string) bool {
 	text := strings.ToLower(strings.TrimSpace(message))
 	if text == "" {
 		return false
 	}
 
-	attentionMarkers := []string{
-		"approval required",
-		"need approval",
-		"needs approval",
-		"need confirmation",
-		"needs confirmation",
-		"confirmation",
-		"before overwriting",
-		"before editing",
-		"before deleting",
-		"before proceeding",
-		"before continuing",
+	followUpMarkers := []string{
 		"would you like me to",
 		"if you'd like me to",
 		"if you'd like, i can",
 		"if you want, i can",
+		"if you want me to",
 		"let me know if you'd like",
 		"let me know if you want",
-		"please confirm",
-		"please approve",
-		"permissionrequest",
-		"permission request",
+		"i can continue",
+		"i can keep going",
+		"i can take the next step",
+		"next step would be",
+		"next steps would be",
+		"should i continue",
+		"shall i continue",
+		"want me to continue",
 		"如果你愿意",
 		"如果你希望",
 		"如果你想",
 		"如果你要",
 		"如果需要",
 		"如果你继续",
+		"你继续的话",
 		"要的话我可以",
 		"要不要我",
 		"是否要我",
-		"请确认",
-		"请批准",
-		"等待你确认",
-		"等你确认",
+		"是否继续",
+		"要我继续",
+		"让我继续",
 		"我下一步可以继续",
 		"我下一步就直接开始",
 		"我下一步就开始",
 		"我下一轮会",
 		"下一轮会",
 		"我可以继续帮你",
+		"我可以继续",
 		"继续帮你做",
 		"直接开始做",
 	}
-	for _, marker := range attentionMarkers {
+	for _, marker := range followUpMarkers {
 		if strings.Contains(text, marker) {
 			return true
 		}
-	}
-
-	if strings.HasSuffix(text, "?") || strings.HasSuffix(text, "？") {
-		return true
 	}
 
 	return false
