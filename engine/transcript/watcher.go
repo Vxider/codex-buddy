@@ -281,6 +281,7 @@ func parseLine(sessionID string, line []byte) (model.TranscriptUpdate, bool) {
 			switch payload.Role {
 			case "user":
 				update.LastUserPromptPreview = text
+				applySlashGoalCommand(&update, text, parsedTime)
 			case "assistant":
 				update.LastAssistantMessage = text
 			}
@@ -300,6 +301,7 @@ func parseLine(sessionID string, line []byte) (model.TranscriptUpdate, bool) {
 		switch payload.Type {
 		case "user_message":
 			update.LastUserPromptPreview = payload.Message
+			applySlashGoalCommand(&update, payload.Message, parsedTime)
 		case "agent_message":
 			update.LastAssistantMessage = payload.Message
 			update.TurnID = payload.TurnID
@@ -346,14 +348,21 @@ func mergeUpdate(dst *model.TranscriptUpdate, src model.TranscriptUpdate) {
 	} else if hasNonErrorProgress(src) {
 		dst.Error = ""
 	}
-	if src.GoalState != "" {
+	if src.GoalUpdated {
+		dst.GoalUpdated = true
 		dst.GoalState = src.GoalState
-	}
-	if src.GoalSummary != "" {
 		dst.GoalSummary = src.GoalSummary
-	}
-	if !src.GoalUpdatedAt.IsZero() {
 		dst.GoalUpdatedAt = src.GoalUpdatedAt
+	} else {
+		if src.GoalState != "" {
+			dst.GoalState = src.GoalState
+		}
+		if src.GoalSummary != "" {
+			dst.GoalSummary = src.GoalSummary
+		}
+		if !src.GoalUpdatedAt.IsZero() {
+			dst.GoalUpdatedAt = src.GoalUpdatedAt
+		}
 	}
 	if src.UpdatedAt.After(dst.UpdatedAt) {
 		dst.UpdatedAt = src.UpdatedAt
@@ -367,6 +376,7 @@ func hasNonErrorProgress(update model.TranscriptUpdate) bool {
 		update.LastUserPromptPreview != "" ||
 		update.LastAssistantMessage != "" ||
 		update.LastBashCommand != "" ||
+		update.GoalUpdated ||
 		update.GoalState != ""
 }
 
@@ -389,7 +399,31 @@ func hasUsefulTranscriptUpdate(update model.TranscriptUpdate) bool {
 		update.LastAssistantMessage != "" ||
 		update.LastBashCommand != "" ||
 		update.Error != "" ||
+		update.GoalUpdated ||
 		update.GoalState != ""
+}
+
+func applySlashGoalCommand(update *model.TranscriptUpdate, text string, updatedAt time.Time) {
+	if update == nil {
+		return
+	}
+	switch normalizeSlashCommand(text) {
+	case "/goal clear":
+		update.GoalUpdated = true
+		update.GoalState = ""
+		update.GoalSummary = ""
+	}
+}
+
+func normalizeSlashCommand(text string) string {
+	fields := strings.Fields(strings.TrimSpace(text))
+	if len(fields) < 1 {
+		return ""
+	}
+	if strings.EqualFold(fields[0], "/goal") && len(fields) == 2 && strings.EqualFold(fields[1], "clear") {
+		return "/goal clear"
+	}
+	return ""
 }
 
 func parseShellCommandArguments(raw string) string {
@@ -413,6 +447,7 @@ func updateGoalState(update *model.TranscriptUpdate, name string, raw string, up
 	if !ok {
 		return
 	}
+	update.GoalUpdated = true
 	update.GoalState = state
 	update.GoalSummary = summary
 	update.GoalUpdatedAt = updatedAt

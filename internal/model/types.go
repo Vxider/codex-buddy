@@ -105,6 +105,7 @@ type TranscriptUpdate struct {
 	LastBashCommand       string
 	Error                 string
 	UpdatedAt             time.Time
+	GoalUpdated           bool
 	GoalState             GoalState
 	GoalSummary           string
 	GoalUpdatedAt         time.Time

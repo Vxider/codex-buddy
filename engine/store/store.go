@@ -206,14 +206,24 @@ func (s *Store) ApplyTranscriptUpdate(update model.TranscriptUpdate) model.Statu
 	if update.Error != "" {
 		session.LastError = preview(update.Error)
 	}
-	if update.GoalState != "" {
+	if update.GoalUpdated {
 		session.GoalState = update.GoalState
-	}
-	if update.GoalSummary != "" {
 		session.GoalSummary = preview(update.GoalSummary)
-	}
-	if !update.GoalUpdatedAt.IsZero() {
-		session.GoalUpdatedAt = update.GoalUpdatedAt
+		if update.GoalState == "" && strings.TrimSpace(update.GoalSummary) == "" {
+			session.GoalUpdatedAt = time.Time{}
+		} else {
+			session.GoalUpdatedAt = update.GoalUpdatedAt
+		}
+	} else {
+		if update.GoalState != "" {
+			session.GoalState = update.GoalState
+		}
+		if update.GoalSummary != "" {
+			session.GoalSummary = preview(update.GoalSummary)
+		}
+		if !update.GoalUpdatedAt.IsZero() {
+			session.GoalUpdatedAt = update.GoalUpdatedAt
+		}
 	}
 	if update.LastAssistantMessage != "" {
 		if stopMessageRequestsFollowUp(session.LastAssistantMessage) {
@@ -1091,6 +1101,14 @@ func summarizeTranscriptUpdate(update model.TranscriptUpdate) string {
 		return "bash: " + preview(update.LastBashCommand)
 	case strings.TrimSpace(update.Error) != "":
 		return "error: " + preview(update.Error)
+	case update.GoalUpdated:
+		if update.GoalState == "" && strings.TrimSpace(update.GoalSummary) == "" {
+			return "goal cleared"
+		}
+		if strings.TrimSpace(update.GoalSummary) != "" {
+			return "goal: " + preview(update.GoalSummary)
+		}
+		return "goal: " + string(update.GoalState)
 	case strings.TrimSpace(update.CWD) != "" || strings.TrimSpace(update.Model) != "":
 		parts := make([]string, 0, 2)
 		if update.CWD != "" {
