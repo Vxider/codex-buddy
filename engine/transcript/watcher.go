@@ -223,7 +223,7 @@ type responseItemPayload struct {
 	Type    string            `json:"type"`
 	Role    string            `json:"role"`
 	Name    string            `json:"name"`
-	Args    string            `json:"arguments"`
+	Args    json.RawMessage   `json:"arguments"`
 	Content []contentFragment `json:"content"`
 }
 
@@ -426,20 +426,21 @@ func normalizeSlashCommand(text string) string {
 	return ""
 }
 
-func parseShellCommandArguments(raw string) string {
-	if strings.TrimSpace(raw) == "" {
+func parseShellCommandArguments(raw json.RawMessage) string {
+	args := argumentObjectJSON(raw)
+	if len(args) == 0 {
 		return ""
 	}
 	var payload struct {
 		Command string `json:"command"`
 	}
-	if err := json.Unmarshal([]byte(raw), &payload); err != nil {
+	if err := json.Unmarshal(args, &payload); err != nil {
 		return ""
 	}
 	return strings.TrimSpace(payload.Command)
 }
 
-func updateGoalState(update *model.TranscriptUpdate, name string, raw string, updatedAt time.Time) {
+func updateGoalState(update *model.TranscriptUpdate, name string, raw json.RawMessage, updatedAt time.Time) {
 	if update == nil {
 		return
 	}
@@ -453,10 +454,14 @@ func updateGoalState(update *model.TranscriptUpdate, name string, raw string, up
 	update.GoalUpdatedAt = updatedAt
 }
 
-func parseGoalToolCall(name string, raw string) (model.GoalState, string, bool) {
+func parseGoalToolCall(name string, raw json.RawMessage) (model.GoalState, string, bool) {
 	name = strings.TrimSpace(name)
 	if index := strings.LastIndex(name, "."); index >= 0 {
 		name = name[index+1:]
+	}
+	args := argumentObjectJSON(raw)
+	if len(args) == 0 {
+		return "", "", false
 	}
 
 	switch name {
@@ -464,7 +469,7 @@ func parseGoalToolCall(name string, raw string) (model.GoalState, string, bool) 
 		var payload struct {
 			Objective string `json:"objective"`
 		}
-		if err := json.Unmarshal([]byte(raw), &payload); err != nil {
+		if err := json.Unmarshal(args, &payload); err != nil {
 			return "", "", false
 		}
 		return model.GoalStateInProgress, strings.TrimSpace(payload.Objective), true
@@ -474,13 +479,33 @@ func parseGoalToolCall(name string, raw string) (model.GoalState, string, bool) 
 			Summary string `json:"summary"`
 			Reason  string `json:"reason"`
 		}
-		if err := json.Unmarshal([]byte(raw), &payload); err != nil {
+		if err := json.Unmarshal(args, &payload); err != nil {
 			return "", "", false
 		}
 		return normalizeGoalStatus(payload.Status), firstNonEmptyText(payload.Summary, payload.Reason), true
 	default:
 		return "", "", false
 	}
+}
+
+func argumentObjectJSON(raw json.RawMessage) []byte {
+	trimmed := bytes.TrimSpace(raw)
+	if len(trimmed) == 0 || bytes.Equal(trimmed, []byte("null")) {
+		return nil
+	}
+	if trimmed[0] != '"' {
+		return trimmed
+	}
+
+	var encoded string
+	if err := json.Unmarshal(trimmed, &encoded); err != nil {
+		return nil
+	}
+	encoded = strings.TrimSpace(encoded)
+	if encoded == "" {
+		return nil
+	}
+	return []byte(encoded)
 }
 
 func normalizeGoalStatus(status string) model.GoalState {
