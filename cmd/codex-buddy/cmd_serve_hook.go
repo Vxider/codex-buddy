@@ -67,6 +67,10 @@ func runHook(args []string) int {
 
 	logger := log.New(os.Stderr, "codex-buddy: ", log.LstdFlags|log.Lmsgprefix)
 
+	if isPermissionRequestEvent(eventName) {
+		ringTerminalBell(logger)
+	}
+
 	cfg, err := config.Load(configPath)
 	if err != nil {
 		logger.Printf("load config: %v", err)
@@ -179,4 +183,21 @@ func tmuxDisplayValue(paneID, format string) string {
 		return ""
 	}
 	return strings.TrimSpace(string(output))
+}
+
+func isPermissionRequestEvent(eventName string) bool {
+	return strings.EqualFold(strings.TrimSpace(eventName), "permission-request")
+}
+
+func ringTerminalBell(logger *log.Logger) {
+	tty, err := os.OpenFile("/dev/tty", os.O_WRONLY, 0)
+	if err != nil {
+		logger.Printf("warning: open tty for permission-request bell failed: %v", err)
+		return
+	}
+	defer tty.Close()
+
+	if _, err := tty.Write([]byte{'\a'}); err != nil {
+		logger.Printf("warning: write permission-request bell failed: %v", err)
+	}
 }

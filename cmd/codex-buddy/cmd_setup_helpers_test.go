@@ -56,6 +56,28 @@ func TestWriteCodexHooksConfigReplacesManagedBlock(t *testing.T) {
 	}
 }
 
+func TestIsPermissionRequestEvent(t *testing.T) {
+	tests := []struct {
+		name  string
+		event string
+		want  bool
+	}{
+		{name: "exact", event: "permission-request", want: true},
+		{name: "case insensitive", event: "Permission-Request", want: true},
+		{name: "trimmed", event: " permission-request\n", want: true},
+		{name: "other event", event: "pre-tool-use", want: false},
+		{name: "empty", event: "", want: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := isPermissionRequestEvent(tt.event); got != tt.want {
+				t.Fatalf("isPermissionRequestEvent(%q) = %v, want %v", tt.event, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestRemoveLegacyCodexBuddyHooksDeletesOldCodexBuddyFile(t *testing.T) {
 	dir := t.TempDir()
 	hooksPath := filepath.Join(dir, "hooks.json")
