@@ -123,6 +123,36 @@ func TestStopFollowUpOfferBecomesAttention(t *testing.T) {
 	}
 }
 
+func TestTranscriptFollowUpPromotesRunningSessionToAttention(t *testing.T) {
+	st := New(0, 0, log.New(io.Discard, "", 0))
+	now := time.Now().UTC()
+
+	st.ApplyIngest(model.IngestRequest{
+		EventName:  "user-prompt-submit",
+		ReceivedAt: now,
+		Payload: model.HookPayload{
+			SessionID: "sess-running-followup",
+		},
+	})
+
+	snapshot := st.ApplyTranscriptUpdate(model.TranscriptUpdate{
+		SessionID:            "sess-running-followup",
+		LastAssistantMessage: "如果你愿意，我下一步可以继续帮你把剩下的验证也跑完。",
+		UpdatedAt:            now.Add(time.Second),
+	})
+	if snapshot.OverallState != model.StateAttention {
+		t.Fatalf("expected attention after transcript follow-up, got %s", snapshot.OverallState)
+	}
+
+	session, ok := st.Session("sess-running-followup")
+	if !ok {
+		t.Fatalf("expected session")
+	}
+	if session.State != model.StateAttention {
+		t.Fatalf("expected running session to become attention, got %s", session.State)
+	}
+}
+
 func TestStopQuestionWithoutFollowUpOfferStaysIdle(t *testing.T) {
 	st := New(0, 0, log.New(io.Discard, "", 0))
 	now := time.Now().UTC()

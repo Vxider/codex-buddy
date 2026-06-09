@@ -199,7 +199,7 @@ func (s *Store) ApplyTranscriptUpdate(update model.TranscriptUpdate) model.Statu
 	}
 	if update.LastAssistantMessage != "" {
 		if stopMessageRequestsFollowUp(session.LastAssistantMessage) {
-			if session.State == model.StateIdle || session.State == model.StateAttention {
+			if session.State != model.StateError {
 				session.State = model.StateAttention
 				session.StateDetail = string(model.StateAttention)
 				session.CurrentAttentionDeadline = s.attentionDeadline()
