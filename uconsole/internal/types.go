@@ -30,6 +30,8 @@ type SessionResponse struct {
 	OpenSummary         string                `json:"open_summary,omitempty"`
 	OpenSummaryMarkdown string                `json:"open_summary_markdown,omitempty"`
 	OpenSummaryHTML     string                `json:"open_summary_html,omitempty"`
+	GoalState           model.GoalState       `json:"goal_state,omitempty"`
+	GoalUpdatedAt       time.Time             `json:"goal_updated_at,omitempty"`
 	TmuxSession         string                `json:"tmux_session,omitempty"`
 	TmuxWindow          string                `json:"tmux_window,omitempty"`
 	TmuxPane            string                `json:"tmux_pane,omitempty"`

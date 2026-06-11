@@ -73,6 +73,10 @@ type App struct {
 	selectedSettingsServerID string
 
 	refreshMu              sync.Mutex
+	ledMu                  sync.Mutex
+	ledSnapshots           map[string]serverSnapshot
+	ledStreamParent        context.Context
+	ledStreamCancel        context.CancelFunc
 	refreshing             bool
 	bgFill                 *canvas.Rectangle
 	cardFills              []*canvas.Rectangle
@@ -1047,6 +1051,7 @@ func Run(ctx context.Context, rootCfg config.Config, configPath string, logger *
 		logger:               logger,
 		clients:              make(map[string]statusClient),
 		serverSnapshots:      make(map[string]serverSnapshot),
+		ledSnapshots:         make(map[string]serverSnapshot),
 		openShortcutByAction: make(map[string]fyne.KeyName),
 		openActionByShortcut: make(map[fyne.KeyName]string),
 		openActionPending:    make(map[string]bool),
@@ -1564,27 +1569,23 @@ func holdDurationLabel(duration time.Duration) string {
 }
 
 func (a *App) startSync(ctx context.Context) {
+	a.ledMu.Lock()
+	a.ledStreamParent = ctx
+	a.ledMu.Unlock()
+	a.restartLEDStreams(ctx)
 	a.pollLoop(ctx)
 }
 
 func (a *App) pollLoop(ctx context.Context) {
 	_ = a.refreshNow(ctx, false)
-	ticker := time.NewTicker(time.Duration(a.cfg.PollFallbackMS) * time.Millisecond)
-	defer ticker.Stop()
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-ticker.C:
-			_ = a.refreshNow(ctx, false)
-		}
-	}
+	<-ctx.Done()
 }
 
 func (a *App) refreshNow(ctx context.Context, force bool) error {
 	servers, clients, previous := a.serverTargets()
 	snapshots := a.loadAllServers(ctx, servers, clients, previous, force)
 	status, notifications, connected, errSummary := aggregateSnapshots(snapshots)
+	a.writeLEDStatusFromSnapshots(snapshots)
 
 	var err error
 	if errSummary != "" {
@@ -1592,6 +1593,107 @@ func (a *App) refreshNow(ctx context.Context, force bool) error {
 	}
 	a.applyState(status, notifications, snapshots, connected, err)
 	return err
+}
+
+func (a *App) restartLEDStreams(ctx context.Context) {
+	a.ledMu.Lock()
+	if ctx == nil {
+		ctx = a.ledStreamParent
+	}
+	if ctx == nil {
+		a.ledMu.Unlock()
+		return
+	}
+	if a.ledStreamCancel != nil {
+		a.ledStreamCancel()
+	}
+	a.ledSnapshots = make(map[string]serverSnapshot)
+	streamCtx, cancel := context.WithCancel(ctx)
+	a.ledStreamCancel = cancel
+	a.ledMu.Unlock()
+	go a.ledStreamLoop(streamCtx)
+}
+
+func (a *App) ledStreamLoop(ctx context.Context) {
+	servers, clients, _ := a.serverTargets()
+	if len(servers) == 0 {
+		a.writeLEDStatus(codexLEDOff, false)
+		return
+	}
+	for _, server := range servers {
+		client, ok := clients[server.ID].(interface {
+			StreamStatus(context.Context, func(StatusResponse)) error
+		})
+		if !ok || client == nil {
+			continue
+		}
+		go a.ledServerStreamLoop(ctx, server, client)
+	}
+}
+
+func (a *App) ledServerStreamLoop(ctx context.Context, server BuddyServer, client interface {
+	StreamStatus(context.Context, func(StatusResponse)) error
+}) {
+	delay := time.Duration(a.cfg.ReconnectDelayMS) * time.Millisecond
+	if delay <= 0 {
+		delay = 3 * time.Second
+	}
+	for ctx.Err() == nil {
+		err := client.StreamStatus(ctx, func(status StatusResponse) {
+			a.updateLEDServerSnapshot(server, status)
+		})
+		if ctx.Err() != nil {
+			return
+		}
+		if err != nil && a.logger != nil {
+			a.logger.Printf("uconsole: status stream disconnected for %s: %v", server.DisplayName(), err)
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(delay):
+		}
+	}
+}
+
+func (a *App) updateLEDServerSnapshot(server BuddyServer, status StatusResponse) {
+	snapshot := serverSnapshot{
+		Server:      server,
+		Status:      annotateStatus(server, status),
+		Connected:   true,
+		FetchedAt:   time.Now(),
+		LastSuccess: time.Now(),
+	}
+	a.ledMu.Lock()
+	a.ledSnapshots[server.ID] = snapshot
+	snapshots := a.currentLEDSnapshotsLocked()
+	a.ledMu.Unlock()
+	a.writeLEDStatusFromSnapshots(snapshots)
+}
+
+func (a *App) currentLEDSnapshotsLocked() []serverSnapshot {
+	snapshots := make([]serverSnapshot, 0, len(a.ledSnapshots))
+	for _, snapshot := range a.ledSnapshots {
+		snapshots = append(snapshots, snapshot)
+	}
+	return snapshots
+}
+
+func (a *App) writeLEDStatusFromSnapshots(snapshots []serverSnapshot) {
+	status, _, connected, _ := aggregateSnapshots(snapshots)
+	a.writeLEDStatus(codexLEDStateFromStatus(status, connected), connected)
+}
+
+func (a *App) writeLEDStatus(state codexLEDState, connected bool) {
+	if err := validateCodexLEDState(state); err != nil {
+		if a.logger != nil {
+			a.logger.Printf("uconsole: invalid LED status ignored: %v", err)
+		}
+		return
+	}
+	if err := writeCodexLEDStatus(state, connected); err != nil && a.logger != nil {
+		a.logger.Printf("uconsole: write LED status failed: %v", err)
+	}
 }
 
 func (a *App) serverTargets() ([]BuddyServer, map[string]statusClient, map[string]serverSnapshot) {
@@ -2897,6 +2999,8 @@ func (a *App) replaceServers(servers []BuddyServer, persist bool) {
 	a.lastStatus, a.lastNotifs, a.connected, a.lastError = aggregateSnapshots(orderedSnapshots)
 	a.syncOpenSessionShortcutsLocked(a.lastStatus.Sessions)
 	a.stateMu.Unlock()
+
+	a.restartLEDStreams(nil)
 
 	if persist {
 		if err := a.saveConfig(func(target *config.Config) {
