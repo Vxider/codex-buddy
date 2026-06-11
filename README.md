@@ -16,6 +16,7 @@ The repository currently contains three tracks:
 
 - Server: passively monitors locally running Codex CLI sessions without creating threads or sending turns
 - uConsole client: native GUI for aggregate state, attention/error reminders, and one-shot `continue + Enter` actions during `attention`
+- macOS menu bar client: native AppKit status item with SSE-backed LED state and on-demand session menu
 - iPhone / Apple Watch companion: SwiftUI sources and an XcodeGen project spec for a mobile client
 
 ## Capabilities
@@ -37,6 +38,16 @@ The repository currently contains three tracks:
   - Connects to a local or remote `codex-buddy` server over HTTP/SSE and supports attention/error cards, acknowledge, continue, and voice follow-up input
 - `codex-buddy uconsole`
   - Compatibility entrypoint for the same GUI app
+
+macOS menu bar app:
+
+```bash
+cd macos
+xcodegen generate
+open CodexBuddyMac.xcodeproj
+```
+
+The menu bar LED is backed by `/v1/stream`; the session list is loaded from `/v1/status` when the menu opens.
 
 ## Build
 

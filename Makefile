@@ -16,6 +16,10 @@ install:
 install-uconsole:
 	./uconsole/scripts/build-install.sh
 
+.PHONY: build-macos
+build-macos:
+	./macos/scripts/build.sh
+
 .PHONY: run
 run:
 	go run ./cmd/codex-buddy serve --config $(APP_DIR)/webserver/examples/config.example.json

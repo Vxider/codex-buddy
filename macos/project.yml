@@ -1,0 +1,37 @@
+name: CodexBuddyMac
+options:
+  bundleIdPrefix: com.vxider.codexbuddy
+  createIntermediateGroups: true
+  xcodeVersion: "16.0"
+  deploymentTarget:
+    macOS: "14.0"
+settings:
+  base:
+    SWIFT_VERSION: 5.10
+    CURRENT_PROJECT_VERSION: 1
+    MARKETING_VERSION: 0.1.0
+    CODE_SIGN_STYLE: Automatic
+    DEVELOPMENT_TEAM: ${CODEX_DEVELOPMENT_TEAM}
+    GENERATE_INFOPLIST_FILE: NO
+targets:
+  CodexBuddyMenuBar:
+    type: application
+    platform: macOS
+    deploymentTarget: "14.0"
+    sources:
+      - path: CodexBuddyMenuBar
+    settings:
+      base:
+        PRODUCT_NAME: CodexBuddy
+        PRODUCT_BUNDLE_IDENTIFIER: com.vxider.codexbuddy.macos
+        INFOPLIST_FILE: CodexBuddyMenuBar/Info.plist
+schemes:
+  CodexBuddyMenuBar:
+    build:
+      targets:
+        CodexBuddyMenuBar: all
+    run:
+      config: Debug
+      executable: CodexBuddyMenuBar
+    archive:
+      config: Release
