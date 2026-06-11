@@ -1,0 +1,45 @@
+{
+  "server_time": "2026-04-22T12:00:05Z",
+  "overall_state": "open",
+  "overall_state_detail": "open",
+  "sessions_count": 1,
+  "sessions": [
+    {
+      "session_id": "sess-1",
+      "short_session_id": "sess-1",
+      "display_title": "sidebar",
+      "compact_title": "sidebar",
+      "micro_title": "sidebar",
+      "state": "open",
+      "state_detail": "open",
+      "updated_at": "2026-04-22T12:00:02Z",
+      "summary": "If you want, I can continue with the next sidebar refactor step",
+      "summary_markdown": "If you want, I can continue with the next sidebar refactor step",
+      "summary_html": "<p>If you want, I can continue with the next sidebar refactor step</p>",
+      "compact_summary": "If you want, I can continue with the next sidebar refactor step",
+      "micro_summary": "If you want, I can continue with the next s…",
+      "needs_open": true,
+      "needs_approval": false,
+      "open_reason": "followup",
+      "open_summary": "If you want, I can continue with the next sidebar refactor step",
+      "open_summary_markdown": "If you want, I can continue with the next sidebar refactor step",
+      "open_summary_html": "<p>If you want, I can continue with the next sidebar refactor step</p>",
+      "compact_open_summary": "If you want, I can continue with the next sidebar refactor step",
+      "micro_open_summary": "If you want, I can continue with the next s…",
+      "tmux_pane": "%12",
+      "can_continue": true,
+      "continue_action": {
+        "method": "POST",
+        "endpoint": "/v1/sessions/sess-1/continue",
+        "action_token": "fixture-token",
+        "label": "Continue"
+      },
+      "can_close": true,
+      "close_action": {
+        "method": "POST",
+        "endpoint": "/v1/sessions/sess-1/close",
+        "label": "Close"
+      }
+    }
+  ]
+}

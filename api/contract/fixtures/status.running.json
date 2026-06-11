@@ -1,0 +1,27 @@
+{
+  "server_time": "2026-04-22T12:00:03Z",
+  "overall_state": "run",
+  "overall_state_detail": "running",
+  "sessions_count": 1,
+  "sessions": [
+    {
+      "session_id": "sess-running",
+      "short_session_id": "sess-run",
+      "display_title": "codex-buddy",
+      "compact_title": "codex-buddy",
+      "micro_title": "codex-buddy",
+      "state": "run",
+      "state_detail": "running",
+      "updated_at": "2026-04-22T12:00:03Z",
+      "summary": "Refactor the client status flow",
+      "summary_markdown": "Refactor the client status flow",
+      "summary_html": "<p>Refactor the client status flow</p>",
+      "compact_summary": "Refactor the client status flow",
+      "micro_summary": "Refactor the client status flow",
+      "needs_open": false,
+      "needs_approval": false,
+      "can_continue": false,
+      "can_close": false
+    }
+  ]
+}
