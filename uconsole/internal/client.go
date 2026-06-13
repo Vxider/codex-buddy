@@ -134,11 +134,6 @@ func (c *Client) SendSessionText(ctx context.Context, session SessionResponse, t
 	return c.executeSessionAction(ctx, session, action, "session text", text)
 }
 
-func (c *Client) CloseSession(ctx context.Context, session SessionResponse) error {
-	action := session.CloseAction
-	return c.executeSessionAction(ctx, session, action, "session close", "")
-}
-
 func (c *Client) executeSessionAction(ctx context.Context, session SessionResponse, action *SessionActionPayload, actionName string, text string) error {
 	if action == nil {
 		return fmt.Errorf("%s is unavailable", actionName)

@@ -37,8 +37,6 @@ type SessionResponse struct {
 	TmuxPane            string                `json:"tmux_pane,omitempty"`
 	CanContinue         bool                  `json:"can_continue,omitempty"`
 	ContinueAction      *SessionActionPayload `json:"continue_action,omitempty"`
-	CanClose            bool                  `json:"can_close,omitempty"`
-	CloseAction         *SessionActionPayload `json:"close_action,omitempty"`
 	ServerID            string                `json:"-"`
 	ServerName          string                `json:"-"`
 	ServerURL           string                `json:"-"`

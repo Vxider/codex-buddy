@@ -61,8 +61,6 @@ type publicSession struct {
 	TmuxPane        string               `json:"tmux_pane,omitempty"`
 	CanContinue     bool                 `json:"can_continue"`
 	ContinueAction  *publicSessionAction `json:"continue_action,omitempty"`
-	CanClose        bool                 `json:"can_close"`
-	CloseAction     *publicSessionAction `json:"close_action,omitempty"`
 }
 
 type publicSessionAction struct {
@@ -275,8 +273,6 @@ func (s *Server) handleSession(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, s.publicSession(session, s.notificationIndex()[sessionID], sessionTitles([]model.SessionSnapshot{session})[sessionID]))
 	case len(parts) == 2 && parts[1] == "continue" && r.Method == http.MethodPost:
 		s.handleSessionContinue(w, r, parts[0])
-	case len(parts) == 2 && parts[1] == "close" && r.Method == http.MethodPost:
-		s.handleSessionClose(w, r, parts[0])
 	default:
 		http.NotFound(w, r)
 	}
@@ -485,15 +481,6 @@ func (s *Server) publicSession(session model.SessionSnapshot, notification model
 			Label:    "Continue",
 		}
 	}
-	if closer, ok := s.control.(control.SessionCloser); ok && closer != nil && item.TmuxPane != "" {
-		item.CanClose = true
-		item.CloseAction = &publicSessionAction{
-			Method:   http.MethodPost,
-			Endpoint: "/v1/sessions/" + session.SessionID + "/close",
-			Label:    "Close",
-		}
-	}
-
 	return item
 }
 
@@ -613,44 +600,6 @@ func (s *Server) handleSessionContinue(w http.ResponseWriter, r *http.Request, s
 	})
 }
 
-func (s *Server) handleSessionClose(w http.ResponseWriter, r *http.Request, sessionID string) {
-	if sessionID == "" {
-		http.NotFound(w, r)
-		return
-	}
-
-	session, ok := s.store.Session(sessionID)
-	if !ok || !s.isSessionVisible(session) {
-		http.NotFound(w, r)
-		return
-	}
-
-	message := "closed"
-	closer, ok := s.control.(control.SessionCloser)
-	if ok && closer != nil && strings.TrimSpace(session.TmuxPane) != "" {
-		if err := closer.Close(session); err != nil {
-			if !control.IsTmuxTargetMissingError(err) {
-				http.Error(w, fmt.Sprintf("close failed: %v", err), http.StatusBadGateway)
-				return
-			}
-			message = "removed stale session"
-		}
-	} else if strings.TrimSpace(session.TmuxPane) != "" {
-		http.Error(w, "close action is not configured", http.StatusNotImplemented)
-		return
-	} else {
-		message = "removed session"
-	}
-	removed, _ := s.store.RemoveSession(sessionID)
-
-	writeJSON(w, http.StatusOK, map[string]any{
-		"ok":      true,
-		"message": message,
-		"session": s.publicSession(removed, model.NotificationSnapshot{}, sessionTitles([]model.SessionSnapshot{removed})[session.SessionID]),
-		"status":  s.publicStatus(s.decorateSnapshot(s.store.Snapshot())),
-	})
-}
-
 func (s *Server) notificationIndex() map[string]model.NotificationSnapshot {
 	items := s.visibleNotifications()
 	out := make(map[string]model.NotificationSnapshot, len(items))
@@ -714,7 +663,13 @@ func (s *Server) visibleNotifications() []model.NotificationSnapshot {
 }
 
 func (s *Server) isSessionVisible(session model.SessionSnapshot) bool {
-	return strings.TrimSpace(session.SessionID) != ""
+	if strings.TrimSpace(session.SessionID) == "" {
+		return false
+	}
+	if s.openCheck != nil && strings.TrimSpace(session.TmuxPane) != "" {
+		return s.openCheck.IsOpen(session)
+	}
+	return true
 }
 
 func shortSessionID(value string) string {

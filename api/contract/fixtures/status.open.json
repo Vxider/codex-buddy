@@ -33,12 +33,6 @@
         "endpoint": "/v1/sessions/sess-1/continue",
         "action_token": "fixture-token",
         "label": "Continue"
-      },
-      "can_close": true,
-      "close_action": {
-        "method": "POST",
-        "endpoint": "/v1/sessions/sess-1/close",
-        "label": "Close"
       }
     }
   ]

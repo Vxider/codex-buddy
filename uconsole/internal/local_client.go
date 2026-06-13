@@ -26,7 +26,6 @@ type statusClient interface {
 	ContinueNotification(ctx context.Context, item NotificationResponse) error
 	ContinueSession(ctx context.Context, session SessionResponse) error
 	SendSessionText(ctx context.Context, session SessionResponse, text string) error
-	CloseSession(ctx context.Context, session SessionResponse) error
 }
 
 type LocalClient struct {
@@ -40,7 +39,7 @@ func NewLocalClient(cfg config.Config, runtime *engine.Runtime) *LocalClient {
 		runtime.Store(),
 		runtime.TranscriptManager(),
 		runtime.ContinueExecutor(),
-		nil,
+		runtime.SessionOpenChecker(),
 		nil,
 	)
 	return &LocalClient{
@@ -132,10 +131,6 @@ func (c *LocalClient) SendSessionText(ctx context.Context, session SessionRespon
 		}
 	}
 	return c.executeSessionAction(ctx, action, "session text", text)
-}
-
-func (c *LocalClient) CloseSession(ctx context.Context, session SessionResponse) error {
-	return c.executeSessionAction(ctx, session.CloseAction, "session close", "")
 }
 
 func (c *LocalClient) executeSessionAction(ctx context.Context, action *SessionActionPayload, actionName string, text string) error {

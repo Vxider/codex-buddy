@@ -30,7 +30,7 @@ func Run(ctx context.Context, cfg config.Config, logger *log.Logger) error {
 		runtime.Store(),
 		runtime.TranscriptManager(),
 		runtime.ContinueExecutor(),
-		nil,
+		runtime.SessionOpenChecker(),
 		logger,
 	)
 	server.SetShutdownFunc(func() {

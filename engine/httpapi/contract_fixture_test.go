@@ -11,7 +11,6 @@ import (
 	"testing"
 
 	"github.com/vxider/codex-buddy/internal/config"
-	"github.com/vxider/codex-buddy/internal/model"
 )
 
 type continueOKFixture struct {
@@ -58,7 +57,7 @@ func TestOpenStatusContractFixtureMatchesServerShape(t *testing.T) {
 	decodeContractFixture(t, filepath.Join("..", "..", "api", "contract", "fixtures", "status.open.json"), &fixture)
 
 	st := newAttentionStore(t)
-	server := NewServer(config.Config{}, st, nil, &stubClosableExecutor{}, nil, log.New(io.Discard, "", 0))
+	server := NewServer(config.Config{}, st, nil, &stubContinueExecutor{}, nil, log.New(io.Discard, "", 0))
 
 	req := httptest.NewRequest(http.MethodGet, "/v1/status", nil)
 	resp := httptest.NewRecorder()
@@ -83,14 +82,6 @@ func TestOpenStatusContractFixtureMatchesServerShape(t *testing.T) {
 	actualSession := actual.Sessions[0]
 	fixtureSession := fixture.Sessions[0]
 	assertContractSessionShape(t, fixtureSession, actualSession)
-}
-
-type stubClosableExecutor struct {
-	stubContinueExecutor
-}
-
-func (s *stubClosableExecutor) Close(model.SessionSnapshot) error {
-	return nil
 }
 
 func assertContractSessionShape(t *testing.T, fixture publicSession, actual publicSession) {
@@ -119,7 +110,6 @@ func assertContractSessionShape(t *testing.T, fixture publicSession, actual publ
 		"micro_open_summary":    {fixture.MicroOpen, actual.MicroOpen},
 		"tmux_pane":             {fixture.TmuxPane, actual.TmuxPane},
 		"can_continue":          {fixture.CanContinue, actual.CanContinue},
-		"can_close":             {fixture.CanClose, actual.CanClose},
 	}
 	for name, values := range checks {
 		if values[0] != values[1] {
@@ -140,12 +130,6 @@ func assertContractSessionShape(t *testing.T, fixture publicSession, actual publ
 	}
 	if actual.ContinueAction.ActionToken == "" {
 		t.Fatalf("expected actual action token")
-	}
-	if fixture.CloseAction == nil || actual.CloseAction == nil {
-		t.Fatalf("expected close actions fixture=%#v actual=%#v", fixture.CloseAction, actual.CloseAction)
-	}
-	if *fixture.CloseAction != *actual.CloseAction {
-		t.Fatalf("close action fixture=%#v actual=%#v", fixture.CloseAction, actual.CloseAction)
 	}
 }
 

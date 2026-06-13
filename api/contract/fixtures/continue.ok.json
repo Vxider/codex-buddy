@@ -14,13 +14,7 @@
     "needs_open": true,
     "needs_approval": false,
     "open_reason": "followup",
-    "can_continue": false,
-    "can_close": true,
-    "close_action": {
-      "method": "POST",
-      "endpoint": "/v1/sessions/sess-1/close",
-      "label": "Close"
-    }
+    "can_continue": false
   },
   "status": {
     "server_time": "2026-04-22T12:00:05Z",

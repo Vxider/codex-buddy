@@ -20,8 +20,7 @@
       "micro_summary": "Refactor the client status flow",
       "needs_open": false,
       "needs_approval": false,
-      "can_continue": false,
-      "can_close": false
+      "can_continue": false
     }
   ]
 }

@@ -177,14 +177,12 @@ type openSessionActionKind string
 const (
 	openSessionActionContinue openSessionActionKind = "continue"
 	openSessionActionVoice    openSessionActionKind = "voice"
-	openSessionActionClose    openSessionActionKind = "close"
 	openSessionActionJump     openSessionActionKind = "jump"
 )
 
 var openSessionActionKinds = []openSessionActionKind{
 	openSessionActionContinue,
 	openSessionActionVoice,
-	openSessionActionClose,
 	openSessionActionJump,
 }
 
@@ -2294,19 +2292,6 @@ func (a *App) executeOpenSessionAction(session SessionResponse, kind openSession
 		_ = a.refreshNow(context.Background(), true)
 	case openSessionActionVoice:
 		a.setStatusLine("Hold the voice shortcut to record a spoken follow-up")
-	case openSessionActionClose:
-		client := a.clientForServer(session.ServerID)
-		if client == nil {
-			a.setStatusLine("Selected server is unavailable")
-			return
-		}
-		a.setStatusLine("Closing " + sessionListTitle(session) + "...")
-		if err := client.CloseSession(context.Background(), session); err != nil {
-			a.setStatusLine(err.Error())
-			return
-		}
-		a.setStatusLine("Close sent")
-		_ = a.refreshNow(context.Background(), true)
 	case openSessionActionJump:
 		a.setStatusLine("Jumping to " + sessionListTitle(session) + "...")
 		if err := jumpToTmuxSession(session); err != nil {
@@ -4855,10 +4840,6 @@ func canVoiceSession(session SessionResponse) bool {
 	return canContinueSession(session)
 }
 
-func canCloseSession(session SessionResponse) bool {
-	return session.CanClose && session.CloseAction != nil
-}
-
 func canJumpSession(session SessionResponse) bool {
 	return strings.TrimSpace(session.TmuxSession) != "" && strings.TrimSpace(session.TmuxPane) != ""
 }
@@ -4869,8 +4850,6 @@ func isOpenSessionActionAvailable(session SessionResponse, kind openSessionActio
 		return canContinueSession(session)
 	case openSessionActionVoice:
 		return canVoiceSession(session)
-	case openSessionActionClose:
-		return canCloseSession(session)
 	case openSessionActionJump:
 		return canJumpSession(session)
 	default:
@@ -4884,8 +4863,6 @@ func openSessionActionLabel(kind openSessionActionKind) string {
 		return "Continue"
 	case openSessionActionVoice:
 		return "Voice"
-	case openSessionActionClose:
-		return "Close"
 	case openSessionActionJump:
 		return "Jump"
 	default:
@@ -4899,8 +4876,6 @@ func openSessionActionVerb(kind openSessionActionKind) string {
 		return "continue"
 	case openSessionActionVoice:
 		return "record voice"
-	case openSessionActionClose:
-		return "close"
 	case openSessionActionJump:
 		return "jump"
 	default:

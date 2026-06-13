@@ -86,7 +86,7 @@ func (r *Runtime) ContinueExecutor() control.ContinueExecutor {
 }
 
 func (r *Runtime) SessionOpenChecker() control.SessionOpenChecker {
-	return nil
+	return control.NewTmuxSessionOpenChecker(r.logger)
 }
 
 func (r *Runtime) Snapshot() model.StatusSnapshot {

@@ -1101,18 +1101,18 @@ func TestStatusUsesHookSessionsWithoutTmuxOpenFiltering(t *testing.T) {
 	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
 		t.Fatalf("decode status: %v", err)
 	}
-	if out.SessionsCount != 2 {
-		t.Fatalf("expected both hook sessions, got %d", out.SessionsCount)
+	if out.SessionsCount != 1 {
+		t.Fatalf("expected only open hook sessions, got %d", out.SessionsCount)
 	}
-	if len(out.Sessions) != 2 {
-		t.Fatalf("expected both hook session items, got %d", len(out.Sessions))
+	if len(out.Sessions) != 1 {
+		t.Fatalf("expected one open hook session item, got %d", len(out.Sessions))
 	}
 	ids := map[string]bool{}
 	for _, session := range out.Sessions {
 		ids[session.SessionID] = true
 	}
-	if !ids["sess-hidden"] || !ids["sess-visible"] {
-		t.Fatalf("expected hook sessions to bypass tmux open filtering, got %#v", ids)
+	if ids["sess-hidden"] || !ids["sess-visible"] {
+		t.Fatalf("expected tmux open filtering for hook sessions, got %#v", ids)
 	}
 }
 
@@ -1143,8 +1143,8 @@ func TestNotificationsUseHookSessionsWithoutTmuxOpenFiltering(t *testing.T) {
 	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
 		t.Fatalf("decode notifications: %v", err)
 	}
-	if len(out.Notifications) != 1 {
-		t.Fatalf("expected hook session notification to remain visible, got %d", len(out.Notifications))
+	if len(out.Notifications) != 0 {
+		t.Fatalf("expected hidden hook session notification to be filtered, got %d", len(out.Notifications))
 	}
 }
 
@@ -1165,8 +1165,8 @@ func TestHookSessionDetailBypassesTmuxOpenFiltering(t *testing.T) {
 	resp := httptest.NewRecorder()
 	server.Handler().ServeHTTP(resp, req)
 
-	if resp.Code != http.StatusOK {
-		t.Fatalf("expected 200 for hook session regardless of tmux open state, got %d", resp.Code)
+	if resp.Code != http.StatusNotFound {
+		t.Fatalf("expected 404 for hook session with closed tmux pane, got %d", resp.Code)
 	}
 }
 
