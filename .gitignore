@@ -40,6 +40,10 @@ tmp-*/
 *.log
 *.pid
 
+# PlatformIO / firmware local files
+.pio/
+firmware/**/.pio/
+
 # Xcode / Swift
 DerivedData/
 build/
