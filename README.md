@@ -38,6 +38,9 @@ The repository currently contains three tracks:
   - Connects to a local or remote `codex-buddy` server over HTTP/SSE and supports attention/error cards, acknowledge, continue, and voice follow-up input
 - `codex-buddy uconsole`
   - Compatibility entrypoint for the same GUI app
+- `codex-buddy esp32`
+  - Bridges `/v1/status` and `/v1/stream` to an ESP32-C3 sidecar over USB CDC / UART
+  - The firmware drives a motor on GPIO 10 and 21 WS2812 LEDs on GPIO 3
 
 macOS menu bar app:
 
@@ -140,6 +143,29 @@ codex-buddy-uconsole --server-url http://<codex-host>:8787
 ```
 
 `codex-buddy uconsole` remains available as a compatibility command. If the current binary does not include the GUI, the command will tell you to rebuild with `-tags uconsole_gui`.
+
+## Running ESP32 Sidecar
+
+Build and flash the firmware in [firmware/codex-buddy-esp32c3](firmware/codex-buddy-esp32c3):
+
+```bash
+cd firmware/codex-buddy-esp32c3
+pio run -t upload
+```
+
+Bridge the local Codex Buddy status stream to the ESP32-C3 serial device:
+
+```bash
+codex-buddy esp32 --uart /dev/ttyACM0
+```
+
+Set the motor independently:
+
+```bash
+codex-buddy esp32 --uart /dev/ttyACM0 --motor 160
+```
+
+The host sends compact newline-delimited frames such as `CB1 state=run led=green detail=running sessions=1 summary=...`. The current transport is UART; the `internal/esp32sidecar` package keeps the transport boundary explicit so BLE advertising can be added without changing the firmware state protocol.
 
 ## Configuration
 

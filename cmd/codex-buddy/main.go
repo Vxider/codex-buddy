@@ -29,6 +29,8 @@ func main() {
 		os.Exit(runStop(os.Args[2:]))
 	case "uconsole":
 		os.Exit(runUConsole(os.Args[2:]))
+	case "esp32":
+		os.Exit(runESP32(os.Args[2:]))
 	case "print-config":
 		os.Exit(runPrintConfig(os.Args[2:]))
 	case "print-hooks":
@@ -64,6 +66,7 @@ func usage(w io.Writer) {
 	_, _ = fmt.Fprintln(w, "  codex-buddy restart [--config path]")
 	_, _ = fmt.Fprintln(w, "  codex-buddy stop [--config path]")
 	_, _ = fmt.Fprintln(w, "  codex-buddy uconsole [--config path] [--server-url url]  # compatibility")
+	_, _ = fmt.Fprintln(w, "  codex-buddy esp32 --uart /dev/ttyACM0 [--server-url url] [--baud 115200] [--once] [--motor 0-255]")
 	_, _ = fmt.Fprintln(w, "  codex-buddy-uconsole [--config path] [--server-url url]")
 	_, _ = fmt.Fprintln(w, "  codex-buddy print-config [--config path]")
 	_, _ = fmt.Fprintln(w, "  codex-buddy print-hooks")
