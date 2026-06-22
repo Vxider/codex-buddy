@@ -13,7 +13,7 @@ constexpr uint8_t kLedPin = 3;
 constexpr uint8_t kLedCount = 21;
 constexpr uint8_t kLedGroups = 3;
 constexpr uint8_t kLedsPerGroup = 7;
-constexpr uint8_t kBrightness = 48;
+constexpr uint8_t kBrightness = 13;
 constexpr rmt_channel_t kRmtChannel = RMT_CHANNEL_0;
 constexpr uint32_t kOfflineAfterMs = 45000;
 constexpr uint32_t kDemoStepMs = 4500;
@@ -550,6 +550,13 @@ void handleCommand(String line) {
     Serial.println("motor 0");
     return;
   }
+  if (lower == "dance") {
+    const uint32_t now = millis();
+    triggerDance(now);
+    renderPurplePipeline(now);
+    sendWs2812();
+    return;
+  }
   if (lower.startsWith("motor ")) {
     const int value = constrain(lower.substring(6).toInt(), 0, 255);
     motorManual = true;
@@ -587,7 +594,7 @@ void handleCommand(String line) {
     return;
   }
   if (lower == "help") {
-    Serial.println("commands: CB1 state=<state> led=<red|yellow|green|purple|off>, led <color>, pixel <0-20> <color>, blackout, idle, run, open, error, offline, motor 0-255, auto");
+    Serial.println("commands: CB1 state=<state> led=<red|yellow|green|purple|off>, dance, led <color>, pixel <0-20> <color>, blackout, idle, run, open, error, offline, motor 0-255, auto");
     return;
   }
   if (lower.startsWith("led ")) {

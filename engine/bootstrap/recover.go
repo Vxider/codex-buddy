@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strconv"
 	"strings"
@@ -44,13 +45,13 @@ func RecoverOpenSessions(logger *log.Logger) ([]Session, error) {
 	if err != nil {
 		return nil, err
 	}
-	if len(panes) == 0 {
-		return nil, nil
-	}
 
 	processes, err := listProcesses()
 	if err != nil {
 		return nil, err
+	}
+	if len(panes) == 0 {
+		return recoverProcessSessions(processes, logger), nil
 	}
 
 	sessions := make([]Session, 0, len(panes))
@@ -100,8 +101,52 @@ func RecoverOpenSessions(logger *log.Logger) ([]Session, error) {
 	return sessions, nil
 }
 
+func recoverProcessSessions(processes map[int]process, logger *log.Logger) []Session {
+	sessions := make([]Session, 0)
+	seen := make(map[string]struct{})
+	for _, proc := range processes {
+		if !isCodexProcess(proc.Args) || isNodeCodexWrapper(proc.Args) {
+			continue
+		}
+		transcriptPath := transcriptPathFromProcessFDs(proc.PID)
+		sessionID := extractSessionIDFromTranscriptPath(transcriptPath)
+		if sessionID == "" {
+			sessionID = sessionIDFromArgs(proc.Args)
+		}
+		if sessionID == "" {
+			if logger != nil {
+				logger.Printf("bootstrap skipped pid=%d: no session id found", proc.PID)
+			}
+			continue
+		}
+		if transcriptPath == "" {
+			transcriptPath = findTranscriptPathBySessionID(sessionID)
+		}
+		if _, ok := seen[sessionID]; ok {
+			continue
+		}
+		seen[sessionID] = struct{}{}
+		sessions = append(sessions, Session{
+			SessionID:      sessionID,
+			TranscriptPath: transcriptPath,
+		})
+	}
+	sort.Slice(sessions, func(i, j int) bool {
+		return sessions[i].SessionID < sessions[j].SessionID
+	})
+	return sessions
+}
+
 func listCodexPanes() ([]pane, error) {
-	cmd := exec.Command("tmux", "list-panes", "-a", "-F", "#{session_name}\t#{window_id}\t#{pane_id}\t#{pane_pid}\t#{pane_dead}\t#{pane_current_command}\t#{pane_current_path}")
+	tmuxPath, ok := tmuxExecutable()
+	if !ok {
+		return nil, nil
+	}
+	args := []string{"list-panes", "-a", "-F", "#{session_name}\t#{window_id}\t#{pane_id}\t#{pane_pid}\t#{pane_dead}\t#{pane_current_command}\t#{pane_current_path}"}
+	if socket := defaultTmuxSocket(); socket != "" {
+		args = append([]string{"-S", socket}, args...)
+	}
+	cmd := exec.Command(tmuxPath, args...)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		if tmuxUnavailable(string(output)) {
@@ -121,7 +166,7 @@ func listCodexPanes() ([]pane, error) {
 		if !ok {
 			continue
 		}
-		if parsed.PaneDead || !strings.EqualFold(parsed.CurrentCommand, "codex") {
+		if parsed.PaneDead {
 			continue
 		}
 		panes = append(panes, parsed)
@@ -130,6 +175,29 @@ func listCodexPanes() ([]pane, error) {
 		return nil, err
 	}
 	return panes, nil
+}
+
+func defaultTmuxSocket() string {
+	if runtime.GOOS != "darwin" {
+		return ""
+	}
+	socket := filepath.Join("/tmp", "tmux-"+strconv.Itoa(os.Getuid()), "default")
+	if info, err := os.Stat(socket); err == nil && !info.IsDir() {
+		return socket
+	}
+	return ""
+}
+
+func tmuxExecutable() (string, bool) {
+	if path, err := exec.LookPath("tmux"); err == nil {
+		return path, true
+	}
+	for _, path := range []string{"/opt/homebrew/bin/tmux", "/usr/local/bin/tmux"} {
+		if info, err := os.Stat(path); err == nil && !info.IsDir() {
+			return path, true
+		}
+	}
+	return "", false
 }
 
 func tmuxUnavailable(output string) bool {
@@ -234,7 +302,7 @@ func findCodexProcessForPane(p pane, processes map[int]process) (process, bool) 
 			if sessionIDFromArgs(current.Args) != "" {
 				return current, true
 			}
-			if !hasFallback {
+			if !hasFallback || isNodeCodexWrapper(fallback.Args) {
 				fallback = current
 				hasFallback = true
 			}
@@ -254,13 +322,31 @@ func isCodexProcess(args string) bool {
 	if args == "codex" {
 		return true
 	}
-	return strings.HasPrefix(args, "codex ")
+	fields := strings.Fields(args)
+	if len(fields) == 0 {
+		return false
+	}
+	executable := filepath.Base(fields[0])
+	if executable == "codex" {
+		return true
+	}
+	if executable == "node" && len(fields) > 1 && filepath.Base(fields[1]) == "codex" {
+		return true
+	}
+	return false
+}
+
+func isNodeCodexWrapper(args string) bool {
+	fields := strings.Fields(strings.TrimSpace(args))
+	return len(fields) > 1 && filepath.Base(fields[0]) == "node" && filepath.Base(fields[1]) == "codex"
 }
 
 func sessionIDFromArgs(args string) string {
 	fields := strings.Fields(strings.TrimSpace(args))
-	if len(fields) >= 3 && fields[0] == "codex" && fields[1] == "resume" {
-		return fields[2]
+	for i := 0; i+2 < len(fields); i++ {
+		if filepath.Base(fields[i]) == "codex" && fields[i+1] == "resume" {
+			return fields[i+2]
+		}
 	}
 	return ""
 }
@@ -269,6 +355,9 @@ func transcriptPathFromProcessFDs(pid int) string {
 	fdDir := filepath.Join("/proc", strconv.Itoa(pid), "fd")
 	entries, err := os.ReadDir(fdDir)
 	if err != nil {
+		if runtime.GOOS == "darwin" {
+			return transcriptPathFromLsof(pid)
+		}
 		return ""
 	}
 
@@ -279,6 +368,27 @@ func transcriptPathFromProcessFDs(pid int) string {
 		}
 		if extractSessionIDFromTranscriptPath(target) != "" {
 			return target
+		}
+	}
+	return ""
+}
+
+func transcriptPathFromLsof(pid int) string {
+	output, err := exec.Command("lsof", "-p", strconv.Itoa(pid)).Output()
+	if err != nil {
+		return ""
+	}
+	scanner := bufio.NewScanner(strings.NewReader(string(output)))
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" || !strings.Contains(line, ".codex/sessions/") {
+			continue
+		}
+		fields := strings.Fields(line)
+		for i := len(fields) - 1; i >= 0; i-- {
+			if extractSessionIDFromTranscriptPath(fields[i]) != "" {
+				return fields[i]
+			}
 		}
 	}
 	return ""

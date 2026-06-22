@@ -7,6 +7,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/vxider/codex-buddy/engine/bootstrap"
 	"github.com/vxider/codex-buddy/engine/control"
 	"github.com/vxider/codex-buddy/engine/store"
 	"github.com/vxider/codex-buddy/engine/transcript"
@@ -68,10 +69,58 @@ func (r *Runtime) Start(ctx context.Context) {
 	}
 	r.startOnce.Do(func() {
 		if r.logger != nil {
-			r.logger.Printf("runtime using Codex hook state; tmux session discovery is disabled")
+			r.logger.Printf("runtime using Codex hook state with tmux session discovery")
 		}
 		r.store.StartReaper(30 * time.Second)
+		r.discoverOpenSessions()
+		go r.discoveryLoop(ctx)
 	})
+}
+
+func (r *Runtime) discoveryLoop(ctx context.Context) {
+	ticker := time.NewTicker(5 * time.Second)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			r.discoverOpenSessions()
+		}
+	}
+}
+
+func (r *Runtime) discoverOpenSessions() {
+	sessions, err := bootstrap.RecoverOpenSessions(r.logger)
+	if err != nil {
+		if r.logger != nil {
+			r.logger.Printf("tmux session discovery failed: %v", err)
+		}
+		return
+	}
+	if r.logger != nil {
+		r.logger.Printf("tmux session discovery found %d session(s)", len(sessions))
+	}
+
+	discovered := make([]store.DiscoverySession, 0, len(sessions))
+	for _, session := range sessions {
+		discovered = append(discovered, store.DiscoverySession{
+			SessionID:      session.SessionID,
+			TranscriptPath: session.TranscriptPath,
+			CWD:            session.CWD,
+			TmuxPane:       session.TmuxPane,
+			TmuxSession:    session.TmuxSession,
+			TmuxWindow:     session.TmuxWindow,
+		})
+	}
+
+	removed, _ := r.store.ApplyDiscovery(discovered, time.Now().UTC())
+	for _, sessionID := range removed {
+		r.transcript.Remove(sessionID)
+	}
+	for _, session := range sessions {
+		r.ensureRecovered(session.SessionID, session.TranscriptPath)
+	}
 }
 
 func (r *Runtime) Store() *store.Store {

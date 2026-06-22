@@ -43,12 +43,12 @@ enum LEDState: String {
         }
         var result = LEDState.off
         for session in snapshot.sessions {
-            result = stronger(result, sessionState(session))
+            result = stronger(result, forSession(session))
         }
         return result
     }
 
-    private static func sessionState(_ session: CodexSessionSummary) -> LEDState {
+    static func forSession(_ session: CodexSessionSummary) -> LEDState {
         let detail = (session.stateDetail ?? "").lowercased()
         let reason = (session.openReason ?? "").lowercased()
         if session.goalState == "achieved" || session.goalState == "complete" || session.goalState == "completed" {

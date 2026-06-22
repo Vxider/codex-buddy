@@ -27,5 +27,7 @@
 		<key>NSAllowsArbitraryLoads</key>
 		<true/>
 	</dict>
+	<key>NSBluetoothAlwaysUsageDescription</key>
+	<string>Codex Buddy can broadcast status colors to an ESP32 indicator.</string>
 </dict>
 </plist>

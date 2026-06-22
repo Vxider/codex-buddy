@@ -117,7 +117,6 @@ func TestTranscriptUserPromptAfterAchievedClearsStaleGoalState(t *testing.T) {
 	if snapshot.GoalState != "" {
 		t.Fatalf("expected status goal state to be empty after later user prompt, got %q", snapshot.GoalState)
 	}
-
 	session, ok := st.Session("sess-goal")
 	if !ok {
 		t.Fatalf("expected session")
@@ -131,7 +130,7 @@ func TestTranscriptUserPromptAfterAchievedClearsStaleGoalState(t *testing.T) {
 	if !session.GoalUpdatedAt.IsZero() {
 		t.Fatalf("expected session goal updated time to be empty after later user prompt, got %s", session.GoalUpdatedAt)
 	}
-}
+	}
 
 func TestStopFollowUpOfferBecomesAttention(t *testing.T) {
 	st := New(0, 0, log.New(io.Discard, "", 0))

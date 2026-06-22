@@ -172,6 +172,10 @@ func (s *Store) ApplyIngest(req model.IngestRequest) model.StatusSnapshot {
 	default:
 		s.logger.Printf("ignoring unknown event=%q session=%q", event, sessionID)
 	}
+	switch event {
+	case "userpromptsubmit", "pretooluse", "posttooluse":
+		clearTerminalGoal(session)
+	}
 
 	s.appendRecentEventLocked(model.RecentEvent{
 		Time:      req.ReceivedAt,
@@ -265,6 +269,9 @@ func (s *Store) ApplyTranscriptUpdate(update model.TranscriptUpdate) model.Statu
 			session.StateDetail = string(model.StateIdle)
 			session.CurrentAttentionDeadline = time.Time{}
 		}
+	}
+	if update.TurnID != "" || update.LastUserPromptPreview != "" || update.LastAssistantMessage != "" || update.LastBashCommand != "" {
+		clearTerminalGoal(session)
 	}
 
 	s.appendRecentEventLocked(model.RecentEvent{
@@ -682,6 +689,15 @@ func stopState(session *sessionState) model.State {
 		return model.StateAttention
 	}
 	return model.StateIdle
+}
+
+func clearTerminalGoal(session *sessionState) {
+	switch session.GoalState {
+	case model.GoalStateAchieved, model.GoalStateBlocked, model.GoalStateNeedsUser:
+		session.GoalState = ""
+		session.GoalSummary = ""
+		session.GoalUpdatedAt = time.Time{}
+	}
 }
 
 func stopMessageRequestsFollowUp(message string) bool {
