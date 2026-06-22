@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"os/signal"
 	"strconv"
 	"strings"
@@ -98,6 +99,9 @@ func runHook(args []string) int {
 	}
 	if payload.CodexPID == 0 {
 		payload.CodexPID = findCodexPID()
+	}
+	if payload.ApprovalsReviewer == "" {
+		payload.ApprovalsReviewer = detectApprovalsReviewer()
 	}
 
 	req := model.IngestRequest{
@@ -242,4 +246,33 @@ func findCodexPID() int {
 		pid = ppid
 	}
 	return 0
+}
+
+
+// detectApprovalsReviewer reads ~/.codex/config.toml to determine the
+// approvals_reviewer setting. Returns "auto_review", "user", or "" if
+// the setting cannot be determined.
+func detectApprovalsReviewer() string {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return ""
+	}
+	data, err := os.ReadFile(filepath.Join(home, ".codex", "config.toml"))
+	if err != nil {
+		return ""
+	}
+	for _, line := range strings.Split(string(data), "\n") {
+		line = strings.TrimSpace(line)
+		if !strings.HasPrefix(line, "approvals_reviewer") {
+			continue
+		}
+		// Extract value between quotes: approvals_reviewer = "auto_review"
+		if idx := strings.Index(line, "\""); idx >= 0 {
+			rest := line[idx+1:]
+			if end := strings.Index(rest, "\""); end >= 0 {
+				return rest[:end]
+			}
+		}
+	}
+	return ""
 }

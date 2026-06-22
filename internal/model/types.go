@@ -41,6 +41,7 @@ type HookPayload struct {
 	ToolInput            any    `json:"tool_input"`
 	Error                string `json:"error"`
 	CodexPID             int    `json:"codex_pid,omitempty"`
+	ApprovalsReviewer    string `json:"approvals_reviewer,omitempty"`
 }
 
 type IngestRequest struct {
@@ -69,6 +70,7 @@ type SessionSnapshot struct {
 	TmuxSession              string    `json:"-"`
 	TmuxWindow               string    `json:"-"`
 	CurrentAttentionDeadline time.Time `json:"-"`
+	PendingApprovalAt        time.Time `json:"-"`
 	GoalState                GoalState `json:"goal_state,omitempty"`
 	GoalSummary              string    `json:"goal_summary,omitempty"`
 	GoalUpdatedAt            time.Time `json:"goal_updated_at,omitempty"`

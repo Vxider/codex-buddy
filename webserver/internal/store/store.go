@@ -21,6 +21,7 @@ type Store struct {
 	recentEvents  []model.RecentEvent
 	attentionHold time.Duration
 	idleFallback  time.Duration
+	pendingApprovalTimeout time.Duration
 	subscribers   map[chan model.StatusSnapshot]struct{}
 	logger        *log.Logger
 }
@@ -39,6 +40,7 @@ func New(attentionHold, idleFallback time.Duration, logger *log.Logger) *Store {
 		recentEvents:  make([]model.RecentEvent, 0, 64),
 		attentionHold: attentionHold,
 		idleFallback:  idleFallback,
+		pendingApprovalTimeout: 30 * time.Second,
 		subscribers:   make(map[chan model.StatusSnapshot]struct{}),
 		logger:        logger,
 	}
@@ -93,11 +95,13 @@ func (s *Store) ApplyIngest(req model.IngestRequest) model.StatusSnapshot {
 	event := canonicalEvent(req.HookEventName, req.EventName)
 	switch event {
 	case "sessionstart":
+		session.PendingApprovalAt = time.Time{}
 		session.State = model.StateIdle
 		session.StateDetail = string(model.StateIdle)
 		session.LastError = ""
 		session.CurrentAttentionDeadline = time.Time{}
 	case "userpromptsubmit":
+		session.PendingApprovalAt = time.Time{}
 		session.State = model.StateRunning
 		session.StateDetail = string(model.StateRunning)
 		session.LastError = ""
@@ -107,9 +111,15 @@ func (s *Store) ApplyIngest(req model.IngestRequest) model.StatusSnapshot {
 			if approvalSummary := approvalRequestSummaryFromToolInput(req.Payload.ToolInput); approvalSummary != "" {
 				session.LastAssistantMessageFull = approvalSummary
 				session.LastAssistantMessage = previewAssistant(approvalSummary)
-				session.State = model.StateAttention
-				session.StateDetail = string(model.StateAttention)
-				session.CurrentAttentionDeadline = s.attentionDeadline()
+				if req.Payload.ApprovalsReviewer == "auto_review" {
+					session.State = model.StateRunning
+					session.StateDetail = string(model.StateRunning)
+					session.PendingApprovalAt = req.ReceivedAt
+				} else {
+					session.State = model.StateAttention
+					session.StateDetail = string(model.StateAttention)
+					session.CurrentAttentionDeadline = s.attentionDeadline()
+				}
 			} else {
 				session.State = model.StateRunningBash
 				session.StateDetail = string(model.StateRunningBash)
@@ -122,18 +132,26 @@ func (s *Store) ApplyIngest(req model.IngestRequest) model.StatusSnapshot {
 		approvalSummary := approvalRequestSummaryFromPayload(req.Payload)
 		session.LastAssistantMessageFull = approvalSummary
 		session.LastAssistantMessage = previewAssistant(approvalSummary)
-		session.State = model.StateAttention
-		session.StateDetail = string(model.StateAttention)
-		session.CurrentAttentionDeadline = s.attentionDeadline()
+		if req.Payload.ApprovalsReviewer == "auto_review" {
+			session.State = model.StateRunning
+			session.StateDetail = string(model.StateRunning)
+			session.PendingApprovalAt = req.ReceivedAt
+		} else {
+			session.State = model.StateAttention
+			session.StateDetail = string(model.StateAttention)
+			session.CurrentAttentionDeadline = s.attentionDeadline()
+		}
 		if command := previewAny(req.Payload.ToolInput); command != "" {
 			session.LastBashCommand = command
 		}
 	case "posttooluse":
+		session.PendingApprovalAt = time.Time{}
 		if strings.EqualFold(req.Payload.ToolName, "Bash") || session.State == model.StateRunningBash {
 			session.State = model.StateRunning
 			session.StateDetail = string(model.StateRunning)
 		}
 	case "stop":
+		session.PendingApprovalAt = time.Time{}
 		session.CurrentAttentionDeadline = s.attentionDeadline()
 		if req.Payload.Error != "" {
 			session.State = model.StateError
@@ -536,6 +554,14 @@ func (s *Store) sortedSessionsLocked() []model.SessionSnapshot {
 }
 
 func (s *Store) deriveSession(session model.SessionSnapshot) model.SessionSnapshot {
+	if !session.PendingApprovalAt.IsZero() && session.State != model.StateAttention {
+		if time.Since(session.PendingApprovalAt) > s.pendingApprovalTimeout {
+			session.State = model.StateAttention
+			session.StateDetail = string(model.StateAttention)
+			session.CurrentAttentionDeadline = s.attentionDeadline()
+			session.PendingApprovalAt = time.Time{}
+		}
+	}
 	if session.State == model.StateAttention && !session.CurrentAttentionDeadline.IsZero() && time.Now().After(session.CurrentAttentionDeadline) {
 		session.State = model.StateIdle
 		session.StateDetail = string(model.StateIdle)
