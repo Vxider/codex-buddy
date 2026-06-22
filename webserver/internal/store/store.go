@@ -15,15 +15,15 @@ import (
 )
 
 type Store struct {
-	mu            sync.RWMutex
-	sessions      map[string]*sessionState
-	notifications map[string]*model.NotificationSnapshot
-	recentEvents  []model.RecentEvent
-	attentionHold time.Duration
-	idleFallback  time.Duration
+	mu                     sync.RWMutex
+	sessions               map[string]*sessionState
+	notifications          map[string]*model.NotificationSnapshot
+	recentEvents           []model.RecentEvent
+	attentionHold          time.Duration
+	idleFallback           time.Duration
 	pendingApprovalTimeout time.Duration
-	subscribers   map[chan model.StatusSnapshot]struct{}
-	logger        *log.Logger
+	subscribers            map[chan model.StatusSnapshot]struct{}
+	logger                 *log.Logger
 }
 
 type sessionState struct {
@@ -35,14 +35,14 @@ type sessionState struct {
 
 func New(attentionHold, idleFallback time.Duration, logger *log.Logger) *Store {
 	return &Store{
-		sessions:      make(map[string]*sessionState),
-		notifications: make(map[string]*model.NotificationSnapshot),
-		recentEvents:  make([]model.RecentEvent, 0, 64),
-		attentionHold: attentionHold,
-		idleFallback:  idleFallback,
+		sessions:               make(map[string]*sessionState),
+		notifications:          make(map[string]*model.NotificationSnapshot),
+		recentEvents:           make([]model.RecentEvent, 0, 64),
+		attentionHold:          attentionHold,
+		idleFallback:           idleFallback,
 		pendingApprovalTimeout: 30 * time.Second,
-		subscribers:   make(map[chan model.StatusSnapshot]struct{}),
-		logger:        logger,
+		subscribers:            make(map[chan model.StatusSnapshot]struct{}),
+		logger:                 logger,
 	}
 }
 
@@ -219,6 +219,25 @@ func (s *Store) ApplyTranscriptUpdate(update model.TranscriptUpdate) model.Statu
 	}
 	if update.Error != "" {
 		session.LastError = preview(update.Error)
+	}
+	if update.GoalUpdated {
+		session.GoalState = update.GoalState
+		session.GoalSummary = preview(update.GoalSummary)
+		if update.GoalState == "" && strings.TrimSpace(update.GoalSummary) == "" {
+			session.GoalUpdatedAt = time.Time{}
+		} else {
+			session.GoalUpdatedAt = update.GoalUpdatedAt
+		}
+	} else {
+		if update.GoalState != "" {
+			session.GoalState = update.GoalState
+		}
+		if update.GoalSummary != "" {
+			session.GoalSummary = preview(update.GoalSummary)
+		}
+		if !update.GoalUpdatedAt.IsZero() {
+			session.GoalUpdatedAt = update.GoalUpdatedAt
+		}
 	}
 	if update.LastAssistantMessage != "" {
 		if stopMessageRequestsFollowUp(session.LastAssistantMessage) {
@@ -460,6 +479,9 @@ func (s *Store) snapshotLocked() model.StatusSnapshot {
 	snapshot.ActiveSessionID = active.SessionID
 	snapshot.OverallState = active.State
 	snapshot.OverallStateDetail = active.StateDetail
+	snapshot.GoalState = active.GoalState
+	snapshot.GoalSummary = active.GoalSummary
+	snapshot.GoalUpdatedAt = active.GoalUpdatedAt
 	return snapshot
 }
 
@@ -1134,6 +1156,14 @@ func summarizeTranscriptUpdate(update model.TranscriptUpdate) string {
 		return "bash: " + preview(update.LastBashCommand)
 	case strings.TrimSpace(update.Error) != "":
 		return "error: " + preview(update.Error)
+	case update.GoalUpdated:
+		if update.GoalState == "" && strings.TrimSpace(update.GoalSummary) == "" {
+			return "goal cleared"
+		}
+		if strings.TrimSpace(update.GoalSummary) != "" {
+			return "goal: " + preview(update.GoalSummary)
+		}
+		return "goal: " + string(update.GoalState)
 	case strings.TrimSpace(update.CWD) != "" || strings.TrimSpace(update.Model) != "":
 		parts := make([]string, 0, 2)
 		if update.CWD != "" {
