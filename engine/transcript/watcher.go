@@ -364,9 +364,31 @@ func mergeUpdate(dst *model.TranscriptUpdate, src model.TranscriptUpdate) {
 			dst.GoalUpdatedAt = src.GoalUpdatedAt
 		}
 	}
+	if shouldClearAchievedGoalAfterUserPrompt(*dst, src) {
+		dst.GoalUpdated = true
+		dst.GoalState = ""
+		dst.GoalSummary = ""
+		dst.GoalUpdatedAt = time.Time{}
+	}
 	if src.UpdatedAt.After(dst.UpdatedAt) {
 		dst.UpdatedAt = src.UpdatedAt
 	}
+}
+
+func shouldClearAchievedGoalAfterUserPrompt(current model.TranscriptUpdate, update model.TranscriptUpdate) bool {
+	if update.LastUserPromptPreview == "" {
+		return false
+	}
+	if update.GoalUpdated && (update.GoalState != "" || strings.TrimSpace(update.GoalSummary) != "") {
+		return false
+	}
+	if current.GoalState != model.GoalStateAchieved {
+		return false
+	}
+	if current.GoalUpdatedAt.IsZero() {
+		return true
+	}
+	return update.UpdatedAt.After(current.GoalUpdatedAt)
 }
 
 func hasNonErrorProgress(update model.TranscriptUpdate) bool {

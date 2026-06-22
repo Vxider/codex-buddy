@@ -109,3 +109,29 @@ func TestRecoverSessionCreateGoalAfterCompleteReturnsInProgress(t *testing.T) {
 		t.Fatalf("unexpected recovered goal summary: %q", update.GoalSummary)
 	}
 }
+
+func TestRecoverSessionUserPromptAfterCompleteClearsGoal(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "rollout-2026-06-08T13-00-00-sess-1.jsonl")
+	content := "" +
+		`{"timestamp":"2026-06-08T13:00:00Z","type":"response_item","payload":{"type":"function_call","name":"create_goal","arguments":{"objective":"ship the fix"}}}` + "\n" +
+		`{"timestamp":"2026-06-08T13:05:00Z","type":"response_item","payload":{"type":"function_call","name":"update_goal","arguments":{"status":"complete"}}}` + "\n" +
+		`{"timestamp":"2026-06-08T13:10:00Z","type":"event_msg","payload":{"type":"user_message","message":"next question"}}` + "\n"
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatalf("write transcript: %v", err)
+	}
+
+	update, err := RecoverSession(path, "sess-1")
+	if err != nil {
+		t.Fatalf("recover session: %v", err)
+	}
+	if !update.GoalUpdated {
+		t.Fatalf("expected recovered goal update")
+	}
+	if update.GoalState != "" {
+		t.Fatalf("expected recovered goal state to be empty, got %q", update.GoalState)
+	}
+	if update.GoalSummary != "" {
+		t.Fatalf("expected recovered goal summary to be empty, got %q", update.GoalSummary)
+	}
+}

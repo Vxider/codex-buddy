@@ -239,6 +239,11 @@ func (s *Store) ApplyTranscriptUpdate(update model.TranscriptUpdate) model.Statu
 			session.GoalUpdatedAt = update.GoalUpdatedAt
 		}
 	}
+	if shouldClearAchievedGoalAfterUserPrompt(session.SessionSnapshot, update) {
+		session.GoalState = ""
+		session.GoalSummary = ""
+		session.GoalUpdatedAt = time.Time{}
+	}
 	if update.LastAssistantMessage != "" {
 		if stopMessageRequestsFollowUp(session.LastAssistantMessage) {
 			if session.State != model.StateError {
@@ -607,6 +612,22 @@ func (s *Store) attentionDeadline() time.Time {
 		return time.Time{}
 	}
 	return time.Now().Add(s.attentionHold)
+}
+
+func shouldClearAchievedGoalAfterUserPrompt(session model.SessionSnapshot, update model.TranscriptUpdate) bool {
+	if update.LastUserPromptPreview == "" {
+		return false
+	}
+	if update.GoalUpdated && (update.GoalState != "" || strings.TrimSpace(update.GoalSummary) != "") {
+		return false
+	}
+	if session.GoalState != model.GoalStateAchieved {
+		return false
+	}
+	if session.GoalUpdatedAt.IsZero() {
+		return true
+	}
+	return update.UpdatedAt.After(session.GoalUpdatedAt)
 }
 
 func stopState(session *sessionState) model.State {

@@ -96,6 +96,43 @@ func TestTranscriptGoalClearRemovesAchievedGoalState(t *testing.T) {
 	}
 }
 
+func TestTranscriptUserPromptAfterAchievedClearsStaleGoalState(t *testing.T) {
+	st := New(0, 0, log.New(io.Discard, "", 0))
+	now := time.Now().UTC()
+
+	st.ApplyTranscriptUpdate(model.TranscriptUpdate{
+		SessionID:     "sess-goal",
+		UpdatedAt:     now,
+		GoalUpdated:   true,
+		GoalState:     model.GoalStateAchieved,
+		GoalSummary:   "ship the fix",
+		GoalUpdatedAt: now,
+	})
+
+	snapshot := st.ApplyTranscriptUpdate(model.TranscriptUpdate{
+		SessionID:             "sess-goal",
+		UpdatedAt:             now.Add(time.Second),
+		LastUserPromptPreview: "next question",
+	})
+	if snapshot.GoalState != "" {
+		t.Fatalf("expected status goal state to be empty after later user prompt, got %q", snapshot.GoalState)
+	}
+
+	session, ok := st.Session("sess-goal")
+	if !ok {
+		t.Fatalf("expected session")
+	}
+	if session.GoalState != "" {
+		t.Fatalf("expected session goal state to be empty after later user prompt, got %q", session.GoalState)
+	}
+	if session.GoalSummary != "" {
+		t.Fatalf("expected session goal summary to be empty after later user prompt, got %q", session.GoalSummary)
+	}
+	if !session.GoalUpdatedAt.IsZero() {
+		t.Fatalf("expected session goal updated time to be empty after later user prompt, got %s", session.GoalUpdatedAt)
+	}
+}
+
 func TestStopFollowUpOfferBecomesAttention(t *testing.T) {
 	st := New(0, 0, log.New(io.Discard, "", 0))
 	now := time.Now().UTC()

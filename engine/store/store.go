@@ -24,15 +24,15 @@ type DiscoverySession struct {
 }
 
 type Store struct {
-	mu            sync.RWMutex
-	sessions      map[string]*sessionState
-	notifications map[string]*model.NotificationSnapshot
-	recentEvents  []model.RecentEvent
-	attentionHold time.Duration
-	idleFallback  time.Duration
+	mu                     sync.RWMutex
+	sessions               map[string]*sessionState
+	notifications          map[string]*model.NotificationSnapshot
+	recentEvents           []model.RecentEvent
+	attentionHold          time.Duration
+	idleFallback           time.Duration
 	pendingApprovalTimeout time.Duration
-	subscribers   map[chan model.StatusSnapshot]struct{}
-	logger        *log.Logger
+	subscribers            map[chan model.StatusSnapshot]struct{}
+	logger                 *log.Logger
 }
 
 type sessionState struct {
@@ -44,14 +44,14 @@ type sessionState struct {
 
 func New(attentionHold, idleFallback time.Duration, logger *log.Logger) *Store {
 	return &Store{
-		sessions:      make(map[string]*sessionState),
-		notifications: make(map[string]*model.NotificationSnapshot),
-		recentEvents:  make([]model.RecentEvent, 0, 64),
-		attentionHold: attentionHold,
-		idleFallback:  idleFallback,
+		sessions:               make(map[string]*sessionState),
+		notifications:          make(map[string]*model.NotificationSnapshot),
+		recentEvents:           make([]model.RecentEvent, 0, 64),
+		attentionHold:          attentionHold,
+		idleFallback:           idleFallback,
 		pendingApprovalTimeout: 30 * time.Second,
-		subscribers:   make(map[chan model.StatusSnapshot]struct{}),
-		logger:        logger,
+		subscribers:            make(map[chan model.StatusSnapshot]struct{}),
+		logger:                 logger,
 	}
 }
 
@@ -247,6 +247,11 @@ func (s *Store) ApplyTranscriptUpdate(update model.TranscriptUpdate) model.Statu
 		if !update.GoalUpdatedAt.IsZero() {
 			session.GoalUpdatedAt = update.GoalUpdatedAt
 		}
+	}
+	if shouldClearAchievedGoalAfterUserPrompt(session.SessionSnapshot, update) {
+		session.GoalState = ""
+		session.GoalSummary = ""
+		session.GoalUpdatedAt = time.Time{}
 	}
 	if update.LastAssistantMessage != "" {
 		if stopMessageRequestsFollowUp(session.LastAssistantMessage) {
@@ -651,6 +656,22 @@ func (s *Store) attentionDeadline() time.Time {
 		return time.Time{}
 	}
 	return time.Now().Add(s.attentionHold)
+}
+
+func shouldClearAchievedGoalAfterUserPrompt(session model.SessionSnapshot, update model.TranscriptUpdate) bool {
+	if update.LastUserPromptPreview == "" {
+		return false
+	}
+	if update.GoalUpdated && (update.GoalState != "" || strings.TrimSpace(update.GoalSummary) != "") {
+		return false
+	}
+	if session.GoalState != model.GoalStateAchieved {
+		return false
+	}
+	if session.GoalUpdatedAt.IsZero() {
+		return true
+	}
+	return update.UpdatedAt.After(session.GoalUpdatedAt)
 }
 
 func stopState(session *sessionState) model.State {
