@@ -70,6 +70,7 @@ func (r *Runtime) Start(ctx context.Context) {
 		if r.logger != nil {
 			r.logger.Printf("runtime using Codex hook state; tmux session discovery is disabled")
 		}
+		r.store.StartReaper(30 * time.Second)
 	})
 }
 

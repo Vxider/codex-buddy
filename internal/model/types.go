@@ -40,6 +40,7 @@ type HookPayload struct {
 	ToolName             string `json:"tool_name"`
 	ToolInput            any    `json:"tool_input"`
 	Error                string `json:"error"`
+	CodexPID             int    `json:"codex_pid,omitempty"`
 }
 
 type IngestRequest struct {

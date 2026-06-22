@@ -13,6 +13,7 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -94,6 +95,9 @@ func runHook(args []string) int {
 	if payload.TmuxPane != "" {
 		payload.TmuxSession = firstNonEmpty(payload.TmuxSession, tmuxDisplayValue(payload.TmuxPane, "#{session_name}"))
 		payload.TmuxWindow = firstNonEmpty(payload.TmuxWindow, tmuxDisplayValue(payload.TmuxPane, "#{window_id}"))
+	}
+	if payload.CodexPID == 0 {
+		payload.CodexPID = findCodexPID()
 	}
 
 	req := model.IngestRequest{
@@ -200,4 +204,42 @@ func ringTerminalBell(logger *log.Logger) {
 	if _, err := tty.Write([]byte{'\a'}); err != nil {
 		logger.Printf("warning: write permission-request bell failed: %v", err)
 	}
+}
+
+
+// findCodexPID walks up the process tree from the current process to find
+// the codex CLI process that spawned this hook. Returns 0 if not found.
+func findCodexPID() int {
+	pid := os.Getppid()
+	for i := 0; i < 16 && pid > 1; i++ {
+		name, err := os.ReadFile("/proc/" + strconv.Itoa(pid) + "/comm")
+		if err == nil {
+			trimmed := strings.TrimSpace(string(name))
+			if strings.HasPrefix(trimmed, "codex") {
+				return pid
+			}
+		}
+		// Walk up: read /proc/<pid>/stat field 4 (ppid)
+		data, err := os.ReadFile("/proc/" + strconv.Itoa(pid) + "/stat")
+		if err != nil {
+			return 0
+		}
+		// stat format: pid (comm) state ppid ...
+		// comm may contain spaces/parens, so find the last ")" and parse after it
+		statStr := string(data)
+		lastParen := strings.LastIndex(statStr, ")")
+		if lastParen < 0 {
+			return 0
+		}
+		fields := strings.Fields(statStr[lastParen+1:])
+		if len(fields) < 2 {
+			return 0
+		}
+		ppid, err := strconv.Atoi(fields[1])
+		if err != nil || ppid <= 1 || ppid == pid {
+			return 0
+		}
+		pid = ppid
+	}
+	return 0
 }

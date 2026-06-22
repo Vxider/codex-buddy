@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/vxider/codex-buddy/internal/model"
@@ -28,6 +29,7 @@ type sessionState struct {
 	model.SessionSnapshot
 	notificationEpoch    int
 	activeNotificationID string
+	codexPID             int
 }
 
 func New(attentionHold, idleFallback time.Duration, logger *log.Logger) *Store {
@@ -71,6 +73,9 @@ func (s *Store) ApplyIngest(req model.IngestRequest) model.StatusSnapshot {
 	session.TmuxPane = coalesce(req.Payload.TmuxPane, session.TmuxPane)
 	session.TmuxSession = coalesce(req.Payload.TmuxSession, session.TmuxSession)
 	session.TmuxWindow = coalesce(req.Payload.TmuxWindow, session.TmuxWindow)
+	if req.Payload.CodexPID > 0 {
+		session.codexPID = req.Payload.CodexPID
+	}
 	session.TranscriptPath = coalesce(req.Payload.TranscriptPath, session.TranscriptPath)
 	session.UpdatedAt = maxTime(req.ReceivedAt, session.UpdatedAt)
 
@@ -438,6 +443,74 @@ func (s *Store) snapshotLocked() model.StatusSnapshot {
 	snapshot.OverallState = active.State
 	snapshot.OverallStateDetail = active.StateDetail
 	return snapshot
+}
+
+// reapDeadSessions removes sessions whose codex process has exited.
+// Sessions without a known PID are left untouched.
+func (s *Store) reapDeadSessions() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	var dead []string
+	for id, session := range s.sessions {
+		if session.codexPID <= 0 {
+			continue
+		}
+		if !processAlive(session.codexPID) {
+			dead = append(dead, id)
+		}
+	}
+
+	for _, id := range dead {
+		session, ok := s.sessions[id]
+		if !ok {
+			continue
+		}
+		delete(s.sessions, id)
+		for nid, notification := range s.notifications {
+			if notification.SessionID == id {
+				delete(s.notifications, nid)
+			}
+		}
+		s.appendRecentEventLocked(model.RecentEvent{
+			Time:      time.Now().UTC(),
+			Source:    "reaper",
+			SessionID: id,
+			EventName: "session_reaped",
+			Summary:   "codex process exited, session removed",
+		})
+		if s.logger != nil {
+			s.logger.Printf("reaped dead session=%s pid=%d", id, session.codexPID)
+		}
+	}
+
+	if len(dead) > 0 {
+		snapshot := s.snapshotLocked()
+		s.broadcastLocked(snapshot)
+	}
+}
+
+// StartReaper launches a background goroutine that periodically removes
+// sessions whose codex process has exited. Call once at startup.
+func (s *Store) StartReaper(interval time.Duration) {
+	if interval <= 0 {
+		interval = 30 * time.Second
+	}
+	go func() {
+		ticker := time.NewTicker(interval)
+		defer ticker.Stop()
+		for range ticker.C {
+			s.reapDeadSessions()
+		}
+	}()
+}
+
+func processAlive(pid int) bool {
+	if pid <= 0 {
+		return false
+	}
+	err := syscall.Kill(pid, 0)
+	return err == nil
 }
 
 func (s *Store) sortedSessionsLocked() []model.SessionSnapshot {
