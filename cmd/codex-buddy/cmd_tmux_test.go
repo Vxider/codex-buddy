@@ -21,12 +21,12 @@ func TestUpdateTmuxDotStateMarksStoppedUnreadAndClearsOnActiveWindow(t *testing.
 		t.Fatalf("did not expect stopped unread while still running")
 	}
 
-	updateTmuxDotState(state, map[string]tmuxWindowState{}, "@8", now.Add(time.Second))
+	updateTmuxDotState(state, map[string]tmuxWindowState{"@7": tmuxStateNone}, "@8", now.Add(time.Second))
 	if !state["@7"].StoppedUnread {
 		t.Fatalf("expected @7 stopped unread after running stopped")
 	}
 
-	updateTmuxDotState(state, map[string]tmuxWindowState{}, "@7", now.Add(2*time.Second))
+	updateTmuxDotState(state, map[string]tmuxWindowState{"@7": tmuxStateNone}, "@7", now.Add(2*time.Second))
 	if state["@7"].StoppedUnread {
 		t.Fatalf("expected @7 stopped unread to clear when active")
 	}
@@ -143,12 +143,12 @@ func TestUpdatePersistedTmuxDotStateStoresAndClearsUnreadState(t *testing.T) {
 		t.Fatalf("expected @7 to record running state")
 	}
 
-	state = updatePersistedTmuxDotState(map[string]tmuxWindowState{}, "@8", now.Add(time.Second))
+	state = updatePersistedTmuxDotState(map[string]tmuxWindowState{"@7": tmuxStateNone}, "@8", now.Add(time.Second))
 	if !state["@7"].StoppedUnread {
 		t.Fatalf("expected @7 stopped unread after running stopped")
 	}
 
-	state = updatePersistedTmuxDotState(map[string]tmuxWindowState{}, "@7", now.Add(2*time.Second))
+	state = updatePersistedTmuxDotState(map[string]tmuxWindowState{"@7": tmuxStateNone}, "@7", now.Add(2*time.Second))
 	if state["@7"].StoppedUnread {
 		t.Fatalf("expected @7 stopped unread to clear when active")
 	}

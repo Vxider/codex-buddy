@@ -103,7 +103,7 @@ func runTmuxWindowDot(args []string) int {
 	case tmuxStatePurple:
 		printPulsingDot("#af00ff")
 	case tmuxStateGreen:
-		printPulsingDot("#00ff00")
+		printPulsingDotPlain()
 	}
 	return 0
 }
@@ -133,9 +133,12 @@ func updateTmuxDotState(state map[string]tmuxDotState, windowStates map[string]t
 		return
 	}
 
-	// Build set of windows that are currently running (green/purple) or have error/attention (red)
+	// windowActive: currently running/error/attention
+	// windowSeen: server explicitly reported this window (including idle)
 	windowActive := make(map[string]bool)
+	windowSeen := make(map[string]bool)
 	for id, s := range windowStates {
+		windowSeen[id] = true
 		if s == tmuxStateGreen || s == tmuxStatePurple || s == tmuxStateRed {
 			windowActive[id] = true
 		}
@@ -143,6 +146,10 @@ func updateTmuxDotState(state map[string]tmuxDotState, windowStates map[string]t
 
 	// Update existing state entries
 	for id, item := range state {
+		if !windowSeen[id] {
+			// Server didn't report this window; keep previous state unchanged
+			continue
+		}
 		active := windowActive[id]
 		// Only mark stopped_unread when transitioning from running to idle
 		// Error/attention (red) does not trigger yellow
@@ -162,13 +169,13 @@ func updateTmuxDotState(state map[string]tmuxDotState, windowStates map[string]t
 		state[id] = item
 	}
 
-	// Add new entries
-	for id, active := range windowActive {
-		item := state[id]
-		if item.WasRunning && !active && id != activeWindowID && windowStates[id] != tmuxStateRed {
-			item.StoppedUnread = true
+	// Add new entries for windows server reported
+	for id := range windowSeen {
+		if _, exists := state[id]; exists {
+			continue
 		}
-		item.WasRunning = active
+		item := tmuxDotState{}
+		item.WasRunning = windowActive[id]
 		item.UpdatedAt = now
 		if id == activeWindowID {
 			item.StoppedUnread = false
@@ -217,8 +224,8 @@ func summarizeTmuxWindows(status apiStatus) map[string]tmuxWindowState {
 				s = tmuxStateGreen
 			}
 		default:
-			// idle/offline: no dot
-			continue
+			// idle/offline: record as none so state machine can see explicit idle
+			s = tmuxStateNone
 		}
 
 		// Keep highest priority
@@ -232,6 +239,14 @@ func summarizeTmuxWindows(status apiStatus) map[string]tmuxWindowState {
 func printPulsingDot(color string) {
 	if time.Now().Unix()%2 == 0 {
 		_, _ = fmt.Fprintf(os.Stdout, "#[fg=%s]●", color)
+	} else {
+		_, _ = fmt.Fprint(os.Stdout, " ")
+	}
+}
+
+func printPulsingDotPlain() {
+	if time.Now().Unix()%2 == 0 {
+		_, _ = fmt.Fprint(os.Stdout, "●")
 	} else {
 		_, _ = fmt.Fprint(os.Stdout, " ")
 	}
