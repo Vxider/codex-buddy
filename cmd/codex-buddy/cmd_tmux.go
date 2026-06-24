@@ -104,6 +104,10 @@ func updateTmuxDotState(state map[string]tmuxDotWindowState, windowRunning map[s
 			item.UpdatedAt = now
 		}
 		item.WasRunning = running
+		if running {
+			item.DownUnread = false
+			item.UpdatedAt = now
+		}
 		if id == activeWindowID {
 			item.DownUnread = false
 			item.UpdatedAt = now

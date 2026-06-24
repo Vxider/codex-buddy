@@ -32,6 +32,25 @@ func TestUpdateTmuxDotStateMarksDownUnreadAndClearsOnActiveWindow(t *testing.T) 
 	}
 }
 
+func TestUpdateTmuxDotStateClearsDownUnreadWhenWindowRunsAgain(t *testing.T) {
+	now := time.Date(2026, 6, 24, 12, 0, 0, 0, time.UTC)
+	state := map[string]tmuxDotWindowState{
+		"@7": {
+			WasRunning: true,
+			DownUnread: true,
+			UpdatedAt:  now,
+		},
+	}
+
+	updateTmuxDotState(state, map[string]bool{"@7": true}, "@8", now.Add(time.Second))
+	if state["@7"].DownUnread {
+		t.Fatalf("expected @7 down unread to clear when running again")
+	}
+	if !state["@7"].WasRunning {
+		t.Fatalf("expected @7 to remain running")
+	}
+}
+
 func TestSummarizeTmuxWindowsAggregatesRunningGoalState(t *testing.T) {
 	status := apiStatus{
 		Sessions: []apiSession{
