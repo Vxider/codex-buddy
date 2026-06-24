@@ -21,6 +21,8 @@ func main() {
 		os.Exit(runSetup(os.Args[2:]))
 	case "status":
 		os.Exit(runStatus(os.Args[2:]))
+	case "tmux-window-dot":
+		os.Exit(runTmuxWindowDot(os.Args[2:]))
 	case "start":
 		os.Exit(runStart(os.Args[2:]))
 	case "restart":
@@ -62,6 +64,7 @@ func usage(w io.Writer) {
 	_, _ = fmt.Fprintln(w, "  codex-buddy hook <event-name> [--config path]")
 	_, _ = fmt.Fprintln(w, "  codex-buddy setup [--config path] [--host 0.0.0.0] [--port 8787] [--skip-systemd]")
 	_, _ = fmt.Fprintln(w, "  codex-buddy status [--config path] [--json]")
+	_, _ = fmt.Fprintln(w, "  codex-buddy tmux-window-dot [--config path] [--timeout-ms 150] <window-id>")
 	_, _ = fmt.Fprintln(w, "  codex-buddy start [--config path]")
 	_, _ = fmt.Fprintln(w, "  codex-buddy restart [--config path]")
 	_, _ = fmt.Fprintln(w, "  codex-buddy stop [--config path]")

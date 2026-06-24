@@ -8,9 +8,12 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"os"
+	"os/exec"
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/vxider/codex-buddy/engine/control"
@@ -32,6 +35,13 @@ type Server struct {
 	openCheck  control.SessionOpenChecker
 	logger     *log.Logger
 	shutdown   func()
+	tmux       tmuxWindowState
+}
+
+type tmuxWindowState struct {
+	mu         sync.Mutex
+	wasRunning map[string]bool
+	down       map[string]bool
 }
 
 type publicSession struct {
@@ -113,6 +123,10 @@ func NewServer(cfg config.Config, sessionStore *store.Store, transcriptManager *
 		control:    executor,
 		openCheck:  openCheck,
 		logger:     logger,
+		tmux: tmuxWindowState{
+			wasRunning: make(map[string]bool),
+			down:       make(map[string]bool),
+		},
 	}
 }
 
@@ -127,6 +141,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/status", s.handleDebug)
 	mux.HandleFunc("/debug/codex", s.handleCodexDebug)
 	mux.HandleFunc("/v1/status", s.handleStatus)
+	mux.HandleFunc("/v1/tmux/window-goal-dot", s.handleTmuxWindowGoalDot)
 	mux.HandleFunc("/v1/notifications", s.handleNotifications)
 	mux.HandleFunc("/v1/notifications/", s.handleNotificationAction)
 	mux.HandleFunc("/v1/sessions", s.handleSessions)
@@ -152,6 +167,149 @@ func (s *Server) handleHealth(w http.ResponseWriter, _ *http.Request) {
 
 func (s *Server) handleStatus(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, http.StatusOK, s.publicStatus(s.decorateSnapshot(s.store.Snapshot())))
+}
+
+func (s *Server) handleTmuxWindowGoalDot(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+	windowID := strings.TrimSpace(r.URL.Query().Get("window"))
+	if windowID == "" {
+		w.WriteHeader(http.StatusOK)
+		return
+	}
+
+	activeWindowID := strings.TrimSpace(r.URL.Query().Get("active_window"))
+	sessions := s.visibleSessions(s.store.Sessions())
+	s.updateTmuxWindowState(sessions, activeWindowID)
+
+	for _, session := range sessions {
+		if strings.TrimSpace(session.TmuxWindow) != windowID {
+			continue
+		}
+		if sessionRunning(session.State) && sessionGoalInProgress(session) {
+			if time.Now().Unix()%2 == 0 {
+				_, _ = w.Write([]byte("#[fg=#af00ff]●"))
+			} else {
+				_, _ = w.Write([]byte(" "))
+			}
+			return
+		}
+	}
+	if s.tmuxWindowDown(windowID) {
+		if time.Now().Unix()%2 == 0 {
+			_, _ = w.Write([]byte("#[fg=#ffff00]●"))
+		} else {
+			_, _ = w.Write([]byte(" "))
+		}
+		return
+	}
+	w.WriteHeader(http.StatusOK)
+}
+
+func (s *Server) updateTmuxWindowState(sessions []model.SessionSnapshot, activeWindowID string) {
+	s.tmux.mu.Lock()
+	defer s.tmux.mu.Unlock()
+
+	if activeWindowID != "" {
+		delete(s.tmux.down, activeWindowID)
+	}
+
+	currentRunning := make(map[string]bool)
+	for _, session := range sessions {
+		windowID := strings.TrimSpace(session.TmuxWindow)
+		if windowID == "" {
+			continue
+		}
+		if sessionRunning(session.State) {
+			currentRunning[windowID] = true
+		}
+	}
+
+	for windowID, wasRunning := range s.tmux.wasRunning {
+		if !wasRunning || currentRunning[windowID] {
+			continue
+		}
+		if windowID != activeWindowID {
+			s.tmux.down[windowID] = true
+		}
+	}
+	s.tmux.wasRunning = currentRunning
+}
+
+func (s *Server) tmuxWindowDown(windowID string) bool {
+	s.tmux.mu.Lock()
+	defer s.tmux.mu.Unlock()
+	return s.tmux.down[windowID]
+}
+
+func sessionRunning(state model.State) bool {
+	switch state {
+	case model.StateRun, model.StateRunning, model.StateRunningBash:
+		return true
+	default:
+		return false
+	}
+}
+
+func sessionGoalInProgress(session model.SessionSnapshot) bool {
+	if session.GoalState == model.GoalStateInProgress {
+		return true
+	}
+	return codexGoalActive(strings.TrimSpace(session.SessionID))
+}
+
+func codexGoalActive(sessionID string) bool {
+	if sessionID == "" {
+		return false
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return false
+	}
+	dbPath := filepath.Join(home, ".codex", "goals_1.sqlite")
+	if _, err := os.Stat(dbPath); err != nil {
+		return false
+	}
+	if !safeSQLiteLiteralID(sessionID) {
+		return false
+	}
+	cmd := exec.Command(
+		"sqlite3",
+		"-noheader",
+		dbPath,
+		"select 1 from thread_goals where thread_id = '"+sessionID+"' and status = 'active' limit 1;",
+	)
+	output, err := cmd.Output()
+	if err != nil {
+		return false
+	}
+	return strings.TrimSpace(string(output)) == "1"
+}
+
+func safeSQLiteLiteralID(value string) bool {
+	if value == "" {
+		return false
+	}
+	for _, r := range value {
+		if r >= 'a' && r <= 'z' {
+			continue
+		}
+		if r >= 'A' && r <= 'Z' {
+			continue
+		}
+		if r >= '0' && r <= '9' {
+			continue
+		}
+		if r == '-' || r == '_' {
+			continue
+		}
+		return false
+	}
+	return true
 }
 
 func (s *Server) handleDebug(w http.ResponseWriter, r *http.Request) {
