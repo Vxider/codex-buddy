@@ -17,10 +17,35 @@ import (
 	"github.com/vxider/codex-buddy/internal/model"
 )
 
-type tmuxDotWindowState struct {
-	WasRunning bool      `json:"was_running"`
-	DownUnread bool      `json:"down_unread"`
-	UpdatedAt  time.Time `json:"updated_at"`
+type tmuxWindowState int
+
+const (
+	tmuxStateNone   tmuxWindowState = iota
+	tmuxStateGreen                  // running normal task
+	tmuxStatePurple                 // running goal
+	tmuxStateYellow                 // stopped/idle
+	tmuxStateRed                    // error/attention
+)
+
+func (s tmuxWindowState) String() string {
+	switch s {
+	case tmuxStateRed:
+		return "red"
+	case tmuxStateYellow:
+		return "yellow"
+	case tmuxStatePurple:
+		return "purple"
+	case tmuxStateGreen:
+		return "green"
+	default:
+		return "none"
+	}
+}
+
+type tmuxDotState struct {
+	WasRunning    bool      `json:"was_running"`
+	StoppedUnread bool      `json:"stopped_unread"`
+	UpdatedAt     time.Time `json:"updated_at"`
 }
 
 func runTmuxWindowDot(args []string) int {
@@ -59,26 +84,36 @@ func runTmuxWindowDot(args []string) int {
 	}
 
 	now := time.Now().UTC()
-	windowRunning, windowGoal := summarizeTmuxWindows(status)
-	state := updatePersistedTmuxDotState(windowRunning, activeWindowID, now)
+	windowStates := summarizeTmuxWindows(status)
+	dotState := updatePersistedTmuxDotState(windowStates, activeWindowID, now)
 
-	if windowGoal[windowID] {
-		printPulsingDot("#af00ff")
-		return 0
+	// Priority: red > yellow > purple > green
+	state := windowStates[windowID]
+	if state == tmuxStateNone {
+		if dotState[windowID].StoppedUnread {
+			state = tmuxStateYellow
+		}
 	}
-	if state[windowID].DownUnread {
+
+	switch state {
+	case tmuxStateRed:
+		printPulsingDot("#ff0000")
+	case tmuxStateYellow:
 		printPulsingDot("#ffff00")
-		return 0
+	case tmuxStatePurple:
+		printPulsingDot("#af00ff")
+	case tmuxStateGreen:
+		printPulsingDot("#00ff00")
 	}
 	return 0
 }
 
-func updatePersistedTmuxDotState(windowRunning map[string]bool, activeWindowID string, now time.Time) map[string]tmuxDotWindowState {
+func updatePersistedTmuxDotState(windowStates map[string]tmuxWindowState, activeWindowID string, now time.Time) map[string]tmuxDotState {
 	unlock, ok := lockTmuxDotState()
 	if !ok {
 		state, err := loadTmuxDotState()
 		if err != nil {
-			return make(map[string]tmuxDotWindowState)
+			return make(map[string]tmuxDotState)
 		}
 		return state
 	}
@@ -86,43 +121,57 @@ func updatePersistedTmuxDotState(windowRunning map[string]bool, activeWindowID s
 
 	state, err := loadTmuxDotState()
 	if err != nil {
-		state = make(map[string]tmuxDotWindowState)
+		state = make(map[string]tmuxDotState)
 	}
-	updateTmuxDotState(state, windowRunning, activeWindowID, now)
+	updateTmuxDotState(state, windowStates, activeWindowID, now)
 	_ = saveTmuxDotState(state)
 	return state
 }
 
-func updateTmuxDotState(state map[string]tmuxDotWindowState, windowRunning map[string]bool, activeWindowID string, now time.Time) {
+func updateTmuxDotState(state map[string]tmuxDotState, windowStates map[string]tmuxWindowState, activeWindowID string, now time.Time) {
 	if state == nil {
 		return
 	}
+
+	// Build set of windows that are currently running (green/purple) or have error/attention (red)
+	windowActive := make(map[string]bool)
+	for id, s := range windowStates {
+		if s == tmuxStateGreen || s == tmuxStatePurple || s == tmuxStateRed {
+			windowActive[id] = true
+		}
+	}
+
+	// Update existing state entries
 	for id, item := range state {
-		running := windowRunning[id]
-		if item.WasRunning && !running && id != activeWindowID {
-			item.DownUnread = true
+		active := windowActive[id]
+		// Only mark stopped_unread when transitioning from running to idle
+		// Error/attention (red) does not trigger yellow
+		if item.WasRunning && !active && id != activeWindowID && windowStates[id] != tmuxStateRed {
+			item.StoppedUnread = true
 			item.UpdatedAt = now
 		}
-		item.WasRunning = running
-		if running {
-			item.DownUnread = false
+		item.WasRunning = active
+		if active {
+			item.StoppedUnread = false
 			item.UpdatedAt = now
 		}
 		if id == activeWindowID {
-			item.DownUnread = false
+			item.StoppedUnread = false
 			item.UpdatedAt = now
 		}
 		state[id] = item
 	}
-	for id, running := range windowRunning {
+
+	// Add new entries
+	for id, active := range windowActive {
 		item := state[id]
-		if item.WasRunning && !running && id != activeWindowID {
-			item.DownUnread = true
+		if item.WasRunning && !active && id != activeWindowID && windowStates[id] != tmuxStateRed {
+			item.StoppedUnread = true
 		}
-		item.WasRunning = running
+		item.WasRunning = active
 		item.UpdatedAt = now
 		if id == activeWindowID {
-			item.DownUnread = false
+			item.StoppedUnread = false
 		}
 		state[id] = item
 	}
@@ -149,31 +198,35 @@ func fetchStatusWithTimeout(cfg config.Config, timeout time.Duration) (apiStatus
 	return status, nil
 }
 
-func summarizeTmuxWindows(status apiStatus) (map[string]bool, map[string]bool) {
-	running := make(map[string]bool)
-	goal := make(map[string]bool)
+func summarizeTmuxWindows(status apiStatus) map[string]tmuxWindowState {
+	result := make(map[string]tmuxWindowState)
 	for _, session := range status.Sessions {
 		windowID := strings.TrimSpace(session.TmuxWindow)
 		if windowID == "" {
 			continue
 		}
-		if tmuxSessionRunning(session.State) {
-			running[windowID] = true
+
+		var s tmuxWindowState
+		switch session.State {
+		case model.StateError, model.StateAttention:
+			s = tmuxStateRed
+		case model.StateRun, model.StateRunning, model.StateRunningBash:
 			if session.GoalState == model.GoalStateInProgress || codexGoalActive(session.SessionID) {
-				goal[windowID] = true
+				s = tmuxStatePurple
+			} else {
+				s = tmuxStateGreen
 			}
+		default:
+			// idle/offline: no dot
+			continue
+		}
+
+		// Keep highest priority
+		if s > result[windowID] {
+			result[windowID] = s
 		}
 	}
-	return running, goal
-}
-
-func tmuxSessionRunning(state model.State) bool {
-	switch state {
-	case model.StateRun, model.StateRunning, model.StateRunningBash:
-		return true
-	default:
-		return false
-	}
+	return result
 }
 
 func printPulsingDot(color string) {
@@ -206,7 +259,7 @@ func lockTmuxDotState() (func(), bool) {
 	}, true
 }
 
-func loadTmuxDotState() (map[string]tmuxDotWindowState, error) {
+func loadTmuxDotState() (map[string]tmuxDotState, error) {
 	path, err := tmuxDotStatePath()
 	if err != nil {
 		return nil, err
@@ -214,21 +267,21 @@ func loadTmuxDotState() (map[string]tmuxDotWindowState, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return make(map[string]tmuxDotWindowState), nil
+			return make(map[string]tmuxDotState), nil
 		}
 		return nil, err
 	}
-	var state map[string]tmuxDotWindowState
+	var state map[string]tmuxDotState
 	if err := json.Unmarshal(data, &state); err != nil {
 		return nil, err
 	}
 	if state == nil {
-		state = make(map[string]tmuxDotWindowState)
+		state = make(map[string]tmuxDotState)
 	}
 	return state, nil
 }
 
-func saveTmuxDotState(state map[string]tmuxDotWindowState) error {
+func saveTmuxDotState(state map[string]tmuxDotState) error {
 	path, err := tmuxDotStatePath()
 	if err != nil {
 		return err
