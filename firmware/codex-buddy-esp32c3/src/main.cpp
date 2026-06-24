@@ -24,6 +24,7 @@ constexpr uint32_t kBleScanDurationSeconds = 1;
 constexpr uint32_t kBleScanPeriodMs = 2000;
 constexpr uint32_t kDanceDurationMs = 5000;
 constexpr uint8_t kDanceMotorDuty = 180;
+constexpr uint32_t kSessionDoneDurationMs = 15000;
 
 struct Color {
   uint8_t r;
@@ -47,6 +48,7 @@ enum class SignalColor {
   Yellow,
   Green,
   Purple,
+  SessionDone,
 };
 
 Color leds[kLedCount]{};
@@ -62,6 +64,7 @@ uint32_t motorAutoOffAt = 0;
 uint32_t lastBleScanAt = 0;
 bool bleScanRunning = false;
 uint8_t lastBleSeq = 0;
+uint32_t sessionDoneAt = 0;
 bool haveBleSeq = false;
 String serialLine;
 BLEScan *bleScan = nullptr;
@@ -122,8 +125,15 @@ void setState(CodexState state) {
   if (currentState == state) {
     return;
   }
+  const CodexState prevState = currentState;
   currentState = state;
   stateStartedAt = millis();
+
+  if (state == CodexState::Idle && prevState == CodexState::Run && currentSignal == SignalColor::State) {
+    currentSignal = SignalColor::SessionDone;
+    sessionDoneAt = millis();
+    Serial.println("session done yellow 15s");
+  }
   Serial.print("state ");
   switch (state) {
     case CodexState::Boot:
@@ -296,6 +306,11 @@ void renderError(uint32_t now) {
   fillSignalGroup(0, redSignal(), now);
 }
 
+void renderSessionDone(uint32_t now) {
+  clearLeds();
+  fillGroup(1, yellowSignal());
+}
+
 void renderPurplePipeline(uint32_t now) {
   clearLeds();
   const uint8_t base = ((now - stateStartedAt) / 110) % kLedsPerGroup;
@@ -360,6 +375,9 @@ void renderStatus(uint32_t now) {
       break;
     case SignalColor::Purple:
       renderPurplePipeline(now);
+      break;
+    case SignalColor::SessionDone:
+      renderSessionDone(now);
       break;
   }
   sendWs2812();
@@ -674,6 +692,10 @@ void loop() {
     setState(CodexState::Offline);
     currentSignal = SignalColor::Off;
     blackoutLeds();
+  }
+  if (sessionDoneAt != 0 && static_cast<int32_t>(currentNow - sessionDoneAt) >= static_cast<int32_t>(kSessionDoneDurationMs)) {
+    sessionDoneAt = 0;
+    currentSignal = SignalColor::State;
   }
   renderStatus(currentNow);
 }
