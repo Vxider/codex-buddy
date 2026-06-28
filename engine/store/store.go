@@ -1,8 +1,11 @@
 package store
 
 import (
+	"bytes"
 	"encoding/json"
+	"fmt"
 	"log"
+	"os/exec"
 	"slices"
 	"strconv"
 	"strings"
@@ -41,6 +44,11 @@ type sessionState struct {
 	activeNotificationID string
 	codexPID             int
 }
+
+var (
+	processAliveFunc = processAlive
+	tmuxPaneOpenFunc = tmuxPaneOpen
+)
 
 func New(attentionHold, idleFallback time.Duration, logger *log.Logger) *Store {
 	return &Store{
@@ -345,6 +353,9 @@ func (s *Store) ApplyDiscovery(sessions []DiscoverySession, now time.Time) ([]st
 		if _, ok := seen[sessionID]; ok {
 			continue
 		}
+		if canonicalAgent(session.Agent) != "codex" {
+			continue
+		}
 		if session.TmuxPane == "" {
 			continue
 		}
@@ -547,23 +558,37 @@ func (s *Store) snapshotLocked() model.StatusSnapshot {
 	return snapshot
 }
 
-// reapDeadSessions removes sessions whose known process has exited.
-// Sessions without a known PID are left untouched.
+// reapDeadSessions removes sessions whose known process or tmux pane has exited.
 func (s *Store) reapDeadSessions() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	var dead []string
+	dead := make(map[string]string)
 	for id, session := range s.sessions {
-		if session.codexPID <= 0 {
+		if session.codexPID > 0 {
+			if !processAliveFunc(session.codexPID) {
+				dead[id] = "process exited"
+			}
 			continue
 		}
-		if !processAlive(session.codexPID) {
-			dead = append(dead, id)
+
+		paneID := strings.TrimSpace(session.TmuxPane)
+		if paneID == "" {
+			continue
+		}
+		open, err := tmuxPaneOpenFunc(paneID)
+		if err != nil {
+			if s.logger != nil {
+				s.logger.Printf("tmux pane open check failed session=%s pane=%s: %v", id, paneID, err)
+			}
+			continue
+		}
+		if !open {
+			dead[id] = "tmux pane closed"
 		}
 	}
 
-	for _, id := range dead {
+	for id, reason := range dead {
 		session, ok := s.sessions[id]
 		if !ok {
 			continue
@@ -579,10 +604,10 @@ func (s *Store) reapDeadSessions() {
 			Source:    "reaper",
 			SessionID: id,
 			EventName: "session_reaped",
-			Summary:   strings.ToLower(agentDisplayName(session.Agent)) + " process exited, session removed",
+			Summary:   strings.ToLower(agentDisplayName(session.Agent)) + " " + reason + ", session removed",
 		})
 		if s.logger != nil {
-			s.logger.Printf("reaped dead session=%s pid=%d", id, session.codexPID)
+			s.logger.Printf("reaped dead session=%s pid=%d reason=%q", id, session.codexPID, reason)
 		}
 	}
 
@@ -613,6 +638,47 @@ func processAlive(pid int) bool {
 	}
 	err := syscall.Kill(pid, 0)
 	return err == nil
+}
+
+func tmuxPaneOpen(paneID string) (bool, error) {
+	paneID = strings.TrimSpace(paneID)
+	if paneID == "" {
+		return false, nil
+	}
+
+	cmd := exec.Command("tmux", "display-message", "-p", "-t", paneID, "#{pane_dead}")
+	var stdout bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stdout
+	if err := cmd.Run(); err != nil {
+		if tmuxTargetMissing(stdout.String()) {
+			return false, nil
+		}
+		return false, fmt.Errorf("tmux pane lookup failed: %w: %s", err, strings.TrimSpace(stdout.String()))
+	}
+	return strings.TrimSpace(stdout.String()) != "1", nil
+}
+
+func tmuxTargetMissing(output string) bool {
+	text := strings.ToLower(strings.TrimSpace(output))
+	if text == "" {
+		return false
+	}
+
+	markers := []string{
+		"can't find pane",
+		"can't find window",
+		"can't find session",
+		"no such pane",
+		"no such window",
+		"no such session",
+	}
+	for _, marker := range markers {
+		if strings.Contains(text, marker) {
+			return true
+		}
+	}
+	return false
 }
 
 func (s *Store) sortedSessionsLocked() []model.SessionSnapshot {

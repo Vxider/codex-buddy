@@ -10,6 +10,109 @@ import (
 	"github.com/vxider/agent-buddy/internal/model"
 )
 
+func TestDiscoveryDoesNotRemoveClaudeHookSessions(t *testing.T) {
+	st := New(0, 0, log.New(io.Discard, "", 0))
+	now := time.Date(2026, 6, 28, 13, 30, 0, 0, time.UTC)
+
+	st.ApplyIngest(model.IngestRequest{
+		Source:     "claude-hook",
+		Agent:      "claude",
+		EventName:  "user-prompt-submit",
+		ReceivedAt: now,
+		Payload: model.HookPayload{
+			Agent:      "claude",
+			SessionID:  "claude-session",
+			TmuxPane:   "%99",
+			TmuxWindow: "@99",
+			Prompt:     "build it",
+		},
+	})
+
+	removed, _ := st.ApplyDiscovery(nil, now.Add(time.Second))
+	if len(removed) != 0 {
+		t.Fatalf("expected no discovered removals, got %v", removed)
+	}
+
+	session, ok := st.Session("claude-session")
+	if !ok {
+		t.Fatalf("expected claude hook session to remain after codex discovery")
+	}
+	if session.Agent != "claude" {
+		t.Fatalf("expected claude agent, got %q", session.Agent)
+	}
+	if session.TmuxWindow != "@99" {
+		t.Fatalf("expected tmux window to remain, got %q", session.TmuxWindow)
+	}
+}
+
+func TestReaperRemovesClaudeSessionWhenTmuxPaneCloses(t *testing.T) {
+	originalTmuxPaneOpen := tmuxPaneOpenFunc
+	tmuxPaneOpenFunc = func(paneID string) (bool, error) {
+		if paneID != "%99" {
+			t.Fatalf("expected pane %%99, got %q", paneID)
+		}
+		return false, nil
+	}
+	defer func() { tmuxPaneOpenFunc = originalTmuxPaneOpen }()
+
+	st := New(0, 0, log.New(io.Discard, "", 0))
+	now := time.Date(2026, 6, 28, 13, 45, 0, 0, time.UTC)
+
+	st.ApplyIngest(model.IngestRequest{
+		Source:     "claude-hook",
+		Agent:      "claude",
+		EventName:  "user-prompt-submit",
+		ReceivedAt: now,
+		Payload: model.HookPayload{
+			Agent:      "claude",
+			SessionID:  "claude-session",
+			TmuxPane:   "%99",
+			TmuxWindow: "@99",
+			Prompt:     "build it",
+		},
+	})
+
+	st.reapDeadSessions()
+
+	if _, ok := st.Session("claude-session"); ok {
+		t.Fatalf("expected claude session to be removed when tmux pane closes")
+	}
+}
+
+func TestReaperKeepsClaudeSessionWhenTmuxPaneOpen(t *testing.T) {
+	originalTmuxPaneOpen := tmuxPaneOpenFunc
+	tmuxPaneOpenFunc = func(paneID string) (bool, error) {
+		if paneID != "%99" {
+			t.Fatalf("expected pane %%99, got %q", paneID)
+		}
+		return true, nil
+	}
+	defer func() { tmuxPaneOpenFunc = originalTmuxPaneOpen }()
+
+	st := New(0, 0, log.New(io.Discard, "", 0))
+	now := time.Date(2026, 6, 28, 13, 46, 0, 0, time.UTC)
+
+	st.ApplyIngest(model.IngestRequest{
+		Source:     "claude-hook",
+		Agent:      "claude",
+		EventName:  "user-prompt-submit",
+		ReceivedAt: now,
+		Payload: model.HookPayload{
+			Agent:      "claude",
+			SessionID:  "claude-session",
+			TmuxPane:   "%99",
+			TmuxWindow: "@99",
+			Prompt:     "build it",
+		},
+	})
+
+	st.reapDeadSessions()
+
+	if _, ok := st.Session("claude-session"); !ok {
+		t.Fatalf("expected claude session to remain while tmux pane is open")
+	}
+}
+
 func TestTranscriptCompletionClearsAttention(t *testing.T) {
 	st := New(0, 0, log.New(io.Discard, "", 0))
 	now := time.Now().UTC()
