@@ -67,8 +67,10 @@ func writeConfigJSON(path string, cfg config.Config) error {
 }
 
 const (
-	agentBuddyHooksBegin = "# BEGIN agent-buddy hooks"
-	agentBuddyHooksEnd   = "# END agent-buddy hooks"
+	agentBuddyHooksBegin       = "# BEGIN agent-buddy hooks"
+	agentBuddyHooksEnd         = "# END agent-buddy hooks"
+	legacyCodexBuddyHooksBegin = "# BEGIN codex-buddy hooks"
+	legacyCodexBuddyHooksEnd   = "# END codex-buddy hooks"
 )
 
 func writeCodexHooksConfig(path, binPath, configPath string) error {
@@ -77,7 +79,7 @@ func writeCodexHooksConfig(path, binPath, configPath string) error {
 	}
 
 	command := func(event string) string {
-		return shellQuote(binPath) + " hook " + event + " --config " + shellQuote(configPath)
+		return binPath + " hook " + event + " --config " + configPath
 	}
 
 	data, err := os.ReadFile(path)
@@ -87,7 +89,7 @@ func writeCodexHooksConfig(path, binPath, configPath string) error {
 		}
 	}
 
-	content := removeManagedHooksBlock(string(data))
+	content := removeManagedHooksBlock(removeLegacyCodexBuddyHooksBlock(string(data)))
 	hooks := strings.TrimSpace(fmt.Sprintf(`
 %s
 [[hooks.SessionStart]]
@@ -292,7 +294,7 @@ func removeAgentBuddyHooksConfig(path string) error {
 		}
 		return err
 	}
-	content := removeManagedHooksBlock(string(data))
+	content := removeManagedHooksBlock(removeLegacyCodexBuddyHooksBlock(string(data)))
 	return os.WriteFile(path, []byte(strings.TrimRight(content, "\n")+"\n"), 0o600)
 }
 
@@ -310,16 +312,44 @@ func managedHooksBlock(content string) string {
 }
 
 func removeManagedHooksBlock(content string) string {
-	start := strings.Index(content, agentBuddyHooksBegin)
-	end := strings.Index(content, agentBuddyHooksEnd)
-	if start < 0 || end < start {
+	return removeDelimitedBlock(content, agentBuddyHooksBegin, agentBuddyHooksEnd)
+}
+
+func removeLegacyCodexBuddyHooksBlock(content string) string {
+	return removeDelimitedBlock(content, legacyCodexBuddyHooksBegin, legacyCodexBuddyHooksEnd)
+}
+
+func removeDelimitedBlock(content, beginMarker, endMarker string) string {
+	start := strings.Index(content, beginMarker)
+	if start < 0 {
 		return content
 	}
-	end += len(agentBuddyHooksEnd)
-	if end < len(content) && content[end] == '\n' {
-		end++
+	end := strings.Index(content[start:], endMarker)
+	if end >= 0 {
+		end += start + len(endMarker)
+		if end < len(content) && content[end] == '\n' {
+			end++
+		}
+		return strings.TrimRight(content[:start], "\n") + content[end:]
 	}
+	if beginMarker != legacyCodexBuddyHooksBegin {
+		return content
+	}
+	end = legacyCodexBuddyHooksFallbackEnd(content, start)
 	return strings.TrimRight(content[:start], "\n") + content[end:]
+}
+
+func legacyCodexBuddyHooksFallbackEnd(content string, start int) int {
+	lines := strings.SplitAfter(content[start:], "\n")
+	end := start
+	for i, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if i > 0 && strings.HasPrefix(trimmed, "[") && !strings.HasPrefix(trimmed, "[[hooks.") && !strings.HasPrefix(trimmed, "[hooks.") {
+			break
+		}
+		end += len(line)
+	}
+	return end
 }
 
 func containsBuddyHookCommand(command string) bool {

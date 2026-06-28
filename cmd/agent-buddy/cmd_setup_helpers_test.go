@@ -56,6 +56,95 @@ func TestWriteCodexHooksConfigReplacesManagedBlock(t *testing.T) {
 	}
 }
 
+func TestWriteCodexHooksConfigUsesPlainCommands(t *testing.T) {
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "config.toml")
+
+	if err := writeCodexHooksConfig(configPath, "/tmp/bin/agent-buddy", "/tmp/agent-buddy/config.json"); err != nil {
+		t.Fatalf("write hooks config: %v", err)
+	}
+	data, err := os.ReadFile(configPath)
+	if err != nil {
+		t.Fatalf("read hooks config: %v", err)
+	}
+	content := string(data)
+	if !strings.Contains(content, `command = "/tmp/bin/agent-buddy hook user-prompt-submit --config /tmp/agent-buddy/config.json"`) {
+		t.Fatalf("expected plain codex hook command, got:\n%s", content)
+	}
+	if strings.Contains(content, `'/tmp/bin/agent-buddy'`) || strings.Contains(content, `'/tmp/agent-buddy/config.json'`) {
+		t.Fatalf("expected codex hook command without shell quotes, got:\n%s", content)
+	}
+}
+
+func TestWriteCodexHooksConfigRemovesLegacyCodexBuddyBlock(t *testing.T) {
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "config.toml")
+	original := strings.Join([]string{
+		`model = "gpt-5.5"`,
+		``,
+		legacyCodexBuddyHooksBegin,
+		`[[hooks.UserPromptSubmit]]`,
+		`hooks = [{ type = "command", command = "'/tmp/bin/codex-buddy' hook user-prompt-submit --config '/tmp/config.json'" }]`,
+		legacyCodexBuddyHooksEnd,
+		``,
+		`[projects."/tmp/demo"]`,
+		`trust_level = "trusted"`,
+		``,
+	}, "\n")
+	if err := os.WriteFile(configPath, []byte(original), 0o600); err != nil {
+		t.Fatalf("write fixture: %v", err)
+	}
+
+	if err := writeCodexHooksConfig(configPath, "/tmp/bin/agent-buddy", "/tmp/agent-buddy/config.json"); err != nil {
+		t.Fatalf("write hooks config: %v", err)
+	}
+	data, err := os.ReadFile(configPath)
+	if err != nil {
+		t.Fatalf("read hooks config: %v", err)
+	}
+	content := string(data)
+	if strings.Contains(content, "codex-buddy") {
+		t.Fatalf("expected legacy codex-buddy block removed, got:\n%s", content)
+	}
+	if !strings.Contains(content, `[projects."/tmp/demo"]`) {
+		t.Fatalf("expected unrelated config preserved, got:\n%s", content)
+	}
+}
+
+func TestWriteCodexHooksConfigRemovesUnterminatedLegacyCodexBuddyBlock(t *testing.T) {
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "config.toml")
+	original := strings.Join([]string{
+		`model = "gpt-5.5"`,
+		``,
+		legacyCodexBuddyHooksBegin,
+		`[[hooks.UserPromptSubmit]]`,
+		`hooks = [{ type = "command", command = "'/tmp/bin/codex-buddy' hook user-prompt-submit --config '/tmp/config.json'" }]`,
+		``,
+		`[mcp_servers.github]`,
+		`type = "http"`,
+		``,
+	}, "\n")
+	if err := os.WriteFile(configPath, []byte(original), 0o600); err != nil {
+		t.Fatalf("write fixture: %v", err)
+	}
+
+	if err := writeCodexHooksConfig(configPath, "/tmp/bin/agent-buddy", "/tmp/agent-buddy/config.json"); err != nil {
+		t.Fatalf("write hooks config: %v", err)
+	}
+	data, err := os.ReadFile(configPath)
+	if err != nil {
+		t.Fatalf("read hooks config: %v", err)
+	}
+	content := string(data)
+	if strings.Contains(content, "codex-buddy") {
+		t.Fatalf("expected unterminated legacy codex-buddy block removed, got:\n%s", content)
+	}
+	if !strings.Contains(content, `[mcp_servers.github]`) {
+		t.Fatalf("expected following config preserved, got:\n%s", content)
+	}
+}
+
 func TestIsPermissionRequestEvent(t *testing.T) {
 	tests := []struct {
 		name  string
