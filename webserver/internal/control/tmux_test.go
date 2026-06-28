@@ -5,7 +5,7 @@ import (
 	"log"
 	"testing"
 
-	"github.com/vxider/codex-buddy/internal/model"
+	"github.com/vxider/agent-buddy/internal/model"
 )
 
 func TestTmuxSessionOpenCheckerHidesSessionsWithoutTmuxBinding(t *testing.T) {

@@ -10,9 +10,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/vxider/codex-buddy/engine/store"
-	"github.com/vxider/codex-buddy/internal/config"
-	"github.com/vxider/codex-buddy/internal/model"
+	"github.com/vxider/agent-buddy/engine/store"
+	"github.com/vxider/agent-buddy/internal/config"
+	"github.com/vxider/agent-buddy/internal/model"
 )
 
 type stubContinueExecutor struct {
@@ -110,6 +110,46 @@ func TestClassifyOpenReasonDoesNotTreatApprovalMentionsAsApproval(t *testing.T) 
 	}
 	if got := classifyOpenReason("Approval required before editing billing rules"); got != "approval" {
 		t.Fatalf("expected explicit approval request, got %q", got)
+	}
+}
+
+func TestStatusIncludesClaudeHookSessionAgent(t *testing.T) {
+	st := store.New(30*time.Second, 0, log.New(io.Discard, "", 0))
+	now := time.Date(2026, 4, 22, 12, 0, 0, 0, time.UTC)
+	st.ApplyIngest(model.IngestRequest{
+		Source:     "claude-hook",
+		Agent:      "claude",
+		EventName:  "user-prompt-submit",
+		ReceivedAt: now,
+		Payload: model.HookPayload{
+			Agent:     "claude",
+			SessionID: "claude-session-1",
+			CWD:       "/repo",
+			Prompt:    "Update the status view",
+		},
+	})
+
+	server := NewServer(config.Config{}, st, nil, nil, nil, log.New(io.Discard, "", 0))
+	req := httptest.NewRequest(http.MethodGet, "/v1/status", nil)
+	resp := httptest.NewRecorder()
+	server.Handler().ServeHTTP(resp, req)
+
+	if resp.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", resp.Code, resp.Body.String())
+	}
+
+	var status publicStatus
+	if err := json.NewDecoder(resp.Body).Decode(&status); err != nil {
+		t.Fatalf("decode status: %v", err)
+	}
+	if len(status.Sessions) != 1 {
+		t.Fatalf("expected one session, got %d", len(status.Sessions))
+	}
+	if status.Sessions[0].Agent != "claude" {
+		t.Fatalf("expected claude agent, got %q", status.Sessions[0].Agent)
+	}
+	if status.Sessions[0].State != model.StateRun {
+		t.Fatalf("expected public run state, got %q", status.Sessions[0].State)
 	}
 }
 

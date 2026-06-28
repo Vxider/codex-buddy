@@ -7,8 +7,8 @@ Usage:
   ./webserver/scripts/build-install.sh [options]
 
 Options:
-  --output PATH       Install destination (default: ~/.local/bin/codex-buddy)
-  --no-restart        Do not restart `codex-buddy.service` after install
+  --output PATH       Install destination (default: ~/.local/bin/agent-buddy)
+  --no-restart        Do not restart `agent-buddy.service` after install
   --dry-run           Print the resolved build/install plan without writing files
   -h, --help          Show this help
 
@@ -23,7 +23,7 @@ REPO_ROOT="$(cd -- "${SCRIPT_DIR}/../.." && pwd)"
 
 RESTART_SERVICE=1
 DRY_RUN=0
-INSTALL_PATH="${HOME}/.local/bin/codex-buddy"
+INSTALL_PATH="${HOME}/.local/bin/agent-buddy"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -73,18 +73,18 @@ fi
 
 mkdir -p "${GOPATH}" "${GOMODCACHE}" "${GOCACHE}"
 
-SERVICE_PATH="${HOME}/.config/systemd/user/codex-buddy.service"
+SERVICE_PATH="${HOME}/.config/systemd/user/agent-buddy.service"
 SHOULD_RESTART=0
 if [[ "${RESTART_SERVICE}" -eq 1 && -f "${SERVICE_PATH}" ]] && command -v systemctl >/dev/null 2>&1; then
   SHOULD_RESTART=1
 fi
 
-echo "==> codex-buddy webserver build + install"
+echo "==> agent-buddy webserver build + install"
 echo "repo: ${REPO_ROOT}"
 echo "install: ${INSTALL_PATH}"
 echo "tags: <none>"
 if [[ "${SHOULD_RESTART}" -eq 1 ]]; then
-  echo "service: codex-buddy.service will be restarted"
+  echo "service: agent-buddy.service will be restarted"
 else
   echo "service: no restart"
 fi
@@ -94,15 +94,15 @@ if [[ "${DRY_RUN}" -eq 1 ]]; then
 fi
 
 mkdir -p "$(dirname -- "${INSTALL_PATH}")"
-TMP_BIN="$(mktemp "${TMPDIR:-/tmp}/codex-buddy.webserver.XXXXXX")"
+TMP_BIN="$(mktemp "${TMPDIR:-/tmp}/agent-buddy.webserver.XXXXXX")"
 INSTALL_DIR="$(dirname -- "${INSTALL_PATH}")"
-TMP_INSTALL="$(mktemp "${INSTALL_DIR}/.codex-buddy.install.XXXXXX")"
+TMP_INSTALL="$(mktemp "${INSTALL_DIR}/.agent-buddy.install.XXXXXX")"
 trap 'rm -f -- "${TMP_BIN}" "${TMP_INSTALL}"' EXIT
 
 echo "==> building"
 (
   cd "${REPO_ROOT}"
-  go build -o "${TMP_BIN}" ./cmd/codex-buddy
+  go build -o "${TMP_BIN}" ./cmd/agent-buddy
 )
 
 echo "==> installing"
@@ -113,7 +113,7 @@ mv -f "${TMP_INSTALL}" "${INSTALL_PATH}"
 if [[ "${SHOULD_RESTART}" -eq 1 ]]; then
   echo "==> restarting service"
   systemctl --user daemon-reload
-  systemctl --user restart codex-buddy.service
+  systemctl --user restart agent-buddy.service
 fi
 
 echo "==> done"

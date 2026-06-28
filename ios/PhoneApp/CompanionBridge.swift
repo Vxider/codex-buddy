@@ -5,10 +5,10 @@ import WatchConnectivity
 final class CompanionBridge: NSObject {
     static let shared = CompanionBridge()
 
-    private var api: CodexBuddyAPI?
+    private var api: AgentBuddyAPI?
     private var snapshotProvider: (() -> CodexStatusSnapshot?)?
 
-    func configure(api: CodexBuddyAPI, snapshotProvider: @escaping () -> CodexStatusSnapshot?) {
+    func configure(api: AgentBuddyAPI, snapshotProvider: @escaping () -> CodexStatusSnapshot?) {
         self.api = api
         self.snapshotProvider = snapshotProvider
         guard WCSession.isSupported() else { return }

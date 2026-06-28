@@ -20,7 +20,7 @@ struct PhoneContentView: View {
                 summarySection
                 sessionsSection
             }
-            .navigationTitle("Codex Buddy")
+            .navigationTitle("Agent Buddy")
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
                     Button {
@@ -318,7 +318,7 @@ struct ServerSettingsView: View {
 
 private enum ServerEditorDestination: Identifiable {
     case add
-    case edit(CodexBuddyServer)
+    case edit(AgentBuddyServer)
 
     var id: String {
         switch self {
@@ -329,7 +329,7 @@ private enum ServerEditorDestination: Identifiable {
         }
     }
 
-    var server: CodexBuddyServer? {
+    var server: AgentBuddyServer? {
         switch self {
         case .add:
             return nil
@@ -341,14 +341,14 @@ private enum ServerEditorDestination: Identifiable {
 
 private struct ServerEditorView: View {
     @ObservedObject var model: PhoneAppModel
-    let editingServer: CodexBuddyServer?
+    let editingServer: AgentBuddyServer?
 
     @Environment(\.dismiss) private var dismiss
     @State private var name: String
     @State private var baseURL: String
     @State private var errorMessage: String?
 
-    init(model: PhoneAppModel, editingServer: CodexBuddyServer?) {
+    init(model: PhoneAppModel, editingServer: AgentBuddyServer?) {
         self.model = model
         self.editingServer = editingServer
         _name = State(initialValue: editingServer?.name ?? "")
@@ -364,7 +364,7 @@ private struct ServerEditorView: View {
                         .textInputAutocapitalization(.never)
                         .autocorrectionDisabled()
                         .keyboardType(.URL)
-                    Text("You can save multiple HTTP or HTTPS Codex Buddy servers and switch between them at any time.")
+                    Text("You can save multiple HTTP or HTTPS Agent Buddy servers and switch between them at any time.")
                         .font(.footnote)
                         .foregroundStyle(.secondary)
                 }

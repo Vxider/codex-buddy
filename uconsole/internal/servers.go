@@ -11,7 +11,7 @@ import (
 
 	"fyne.io/fyne/v2"
 
-	"github.com/vxider/codex-buddy/internal/config"
+	"github.com/vxider/agent-buddy/internal/config"
 )
 
 const (

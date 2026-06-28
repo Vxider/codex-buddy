@@ -7,12 +7,12 @@ import (
 	"sync"
 	"time"
 
-	"github.com/vxider/codex-buddy/engine/bootstrap"
-	"github.com/vxider/codex-buddy/engine/control"
-	"github.com/vxider/codex-buddy/engine/store"
-	"github.com/vxider/codex-buddy/engine/transcript"
-	"github.com/vxider/codex-buddy/internal/config"
-	"github.com/vxider/codex-buddy/internal/model"
+	"github.com/vxider/agent-buddy/engine/bootstrap"
+	"github.com/vxider/agent-buddy/engine/control"
+	"github.com/vxider/agent-buddy/engine/store"
+	"github.com/vxider/agent-buddy/engine/transcript"
+	"github.com/vxider/agent-buddy/internal/config"
+	"github.com/vxider/agent-buddy/internal/model"
 )
 
 type Runtime struct {
@@ -30,7 +30,7 @@ type Runtime struct {
 
 func NewRuntime(cfg config.Config, logger *log.Logger) *Runtime {
 	if logger == nil {
-		logger = log.New(log.Writer(), "codex-buddy: ", log.LstdFlags|log.Lmsgprefix)
+		logger = log.New(log.Writer(), "agent-buddy: ", log.LstdFlags|log.Lmsgprefix)
 	}
 
 	sessionStore := store.New(

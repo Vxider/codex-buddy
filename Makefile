@@ -2,7 +2,7 @@ APP_DIR := $(CURDIR)
 
 .PHONY: build
 build:
-	go build -o bin/codex-buddy ./cmd/codex-buddy
+	go build -o bin/agent-buddy ./cmd/agent-buddy
 
 .PHONY: test
 test:
@@ -22,7 +22,7 @@ build-macos:
 
 .PHONY: run
 run:
-	go run ./cmd/codex-buddy serve --config $(APP_DIR)/webserver/examples/config.example.json
+	go run ./cmd/agent-buddy serve --config $(APP_DIR)/webserver/examples/config.example.json
 
 .PHONY: fmt
 fmt:

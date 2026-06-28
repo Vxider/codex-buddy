@@ -26,6 +26,7 @@ const (
 )
 
 type HookPayload struct {
+	Agent                string `json:"agent,omitempty"`
 	HookEventName        string `json:"hook_event_name"`
 	SessionID            string `json:"session_id"`
 	TurnID               string `json:"turn_id"`
@@ -46,6 +47,7 @@ type HookPayload struct {
 
 type IngestRequest struct {
 	Source        string      `json:"source"`
+	Agent         string      `json:"agent,omitempty"`
 	EventName     string      `json:"event_name"`
 	HookEventName string      `json:"hook_event_name"`
 	ReceivedAt    time.Time   `json:"received_at"`
@@ -53,6 +55,7 @@ type IngestRequest struct {
 }
 
 type SessionSnapshot struct {
+	Agent                    string    `json:"agent,omitempty"`
 	SessionID                string    `json:"session_id"`
 	TurnID                   string    `json:"turn_id,omitempty"`
 	CWD                      string    `json:"cwd,omitempty"`

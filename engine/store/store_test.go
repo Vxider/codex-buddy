@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/vxider/codex-buddy/internal/model"
+	"github.com/vxider/agent-buddy/internal/model"
 )
 
 func TestTranscriptCompletionClearsAttention(t *testing.T) {
@@ -130,7 +130,7 @@ func TestTranscriptUserPromptAfterAchievedClearsStaleGoalState(t *testing.T) {
 	if !session.GoalUpdatedAt.IsZero() {
 		t.Fatalf("expected session goal updated time to be empty after later user prompt, got %s", session.GoalUpdatedAt)
 	}
-	}
+}
 
 func TestStopFollowUpOfferBecomesAttention(t *testing.T) {
 	st := New(0, 0, log.New(io.Discard, "", 0))

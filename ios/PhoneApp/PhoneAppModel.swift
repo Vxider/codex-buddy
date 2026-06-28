@@ -6,14 +6,14 @@ final class PhoneAppModel: ObservableObject {
     @Published var errorMessage: String?
     @Published var isLoading = false
     @Published private(set) var isOffline: Bool
-    @Published private(set) var servers: [CodexBuddyServer]
+    @Published private(set) var servers: [AgentBuddyServer]
     @Published private(set) var selectedServerID: UUID?
     private var isSilentRefreshInFlight = false
 
-    private let api: CodexBuddyAPI
+    private let api: AgentBuddyAPI
     private let bridge: CompanionBridge
 
-    init(api: CodexBuddyAPI = .shared, bridge: CompanionBridge? = nil) {
+    init(api: AgentBuddyAPI = .shared, bridge: CompanionBridge? = nil) {
         let bridge = bridge ?? .shared
         let initialSnapshot = CodexSnapshotStore.load() ?? .offline
         self.api = api
@@ -60,23 +60,23 @@ final class PhoneAppModel: ObservableObject {
         }
     }
 
-    var activeServer: CodexBuddyServer? {
+    var activeServer: AgentBuddyServer? {
         guard let selectedServerID else { return nil }
         return servers.first { $0.id == selectedServerID }
     }
 
-    func selectServer(_ server: CodexBuddyServer) async {
+    func selectServer(_ server: AgentBuddyServer) async {
         api.selectServer(id: server.id)
         reloadServers()
         await refreshSilently()
     }
 
-    func saveServer(name: String, baseURL: String, editing server: CodexBuddyServer?) throws {
+    func saveServer(name: String, baseURL: String, editing server: AgentBuddyServer?) throws {
         _ = try api.saveServer(name: name, baseURL: baseURL, id: server?.id)
         reloadServers()
     }
 
-    func deleteServer(_ server: CodexBuddyServer) {
+    func deleteServer(_ server: AgentBuddyServer) {
         api.deleteServer(id: server.id)
         reloadServers()
     }

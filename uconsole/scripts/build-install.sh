@@ -7,7 +7,7 @@ Usage:
   ./uconsole/scripts/build-install.sh [options]
 
 Options:
-  --output PATH       Install destination (default: ~/.local/bin/codex-buddy-uconsole)
+  --output PATH       Install destination (default: ~/.local/bin/agent-buddy-uconsole)
   --dry-run           Print the resolved build/install plan without writing files
   -h, --help          Show this help
 
@@ -22,11 +22,11 @@ DESKTOP_INSTALL_SCRIPT="${SCRIPT_DIR}/install-user-desktop.sh"
 
 GO_HOME_BASE="${HOME}"
 if [[ ! -d "${GO_HOME_BASE}" || ! -w "${GO_HOME_BASE}" ]]; then
-  GO_HOME_BASE="${TMPDIR:-/tmp}/codex-buddy-go"
+  GO_HOME_BASE="${TMPDIR:-/tmp}/agent-buddy-go"
 fi
 
 DRY_RUN=0
-INSTALL_PATH="${HOME}/.local/bin/codex-buddy-uconsole"
+INSTALL_PATH="${HOME}/.local/bin/agent-buddy-uconsole"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -81,7 +81,7 @@ export CC="${SCRIPT_DIR}/gcc-no-base64.sh"
 
 TAGS=("uconsole_gui")
 
-echo "==> codex-buddy uconsole build + install"
+echo "==> agent-buddy uconsole build + install"
 echo "repo: ${REPO_ROOT}"
 echo "install: ${INSTALL_PATH}"
 echo "tags: ${TAGS[*]}"
@@ -93,14 +93,14 @@ fi
 
 INSTALL_DIR="$(dirname -- "${INSTALL_PATH}")"
 mkdir -p "${INSTALL_DIR}"
-TMP_BIN="$(mktemp "${TMPDIR:-/tmp}/codex-buddy.uconsole.XXXXXX")"
-TMP_INSTALL="${INSTALL_DIR}/.codex-buddy.install.$$"
+TMP_BIN="$(mktemp "${TMPDIR:-/tmp}/agent-buddy.uconsole.XXXXXX")"
+TMP_INSTALL="${INSTALL_DIR}/.agent-buddy.install.$$"
 trap 'rm -f -- "${TMP_BIN}" "${TMP_INSTALL}"' EXIT
 
 echo "==> building"
 (
   cd "${REPO_ROOT}"
-  go build -tags "$(IFS=' '; printf '%s' "${TAGS[*]}")" -o "${TMP_BIN}" ./cmd/codex-buddy-uconsole
+  go build -tags "$(IFS=' '; printf '%s' "${TAGS[*]}")" -o "${TMP_BIN}" ./cmd/agent-buddy-uconsole
 )
 
 echo "==> installing"

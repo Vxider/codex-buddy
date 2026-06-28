@@ -8,14 +8,14 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/vxider/codex-buddy/engine"
-	"github.com/vxider/codex-buddy/engine/httpapi"
-	"github.com/vxider/codex-buddy/internal/config"
+	"github.com/vxider/agent-buddy/engine"
+	"github.com/vxider/agent-buddy/engine/httpapi"
+	"github.com/vxider/agent-buddy/internal/config"
 )
 
 func Run(ctx context.Context, cfg config.Config, logger *log.Logger) error {
 	if logger == nil {
-		logger = log.New(log.Writer(), "codex-buddy: ", log.LstdFlags|log.Lmsgprefix)
+		logger = log.New(log.Writer(), "agent-buddy: ", log.LstdFlags|log.Lmsgprefix)
 	}
 	if ctx == nil {
 		ctx = context.Background()

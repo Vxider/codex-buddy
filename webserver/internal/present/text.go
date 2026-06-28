@@ -3,7 +3,7 @@ package present
 import (
 	"strings"
 
-	"github.com/vxider/codex-buddy/internal/model"
+	"github.com/vxider/agent-buddy/internal/model"
 )
 
 func ErrorTitle(session model.SessionSnapshot) string {

@@ -33,9 +33,9 @@ import (
 	"fyne.io/fyne/v2/widget"
 	xhtml "golang.org/x/net/html"
 
-	"github.com/vxider/codex-buddy/engine"
-	"github.com/vxider/codex-buddy/internal/config"
-	"github.com/vxider/codex-buddy/internal/model"
+	"github.com/vxider/agent-buddy/engine"
+	"github.com/vxider/agent-buddy/internal/config"
+	"github.com/vxider/agent-buddy/internal/model"
 )
 
 type App struct {
@@ -1055,14 +1055,14 @@ func Run(ctx context.Context, rootCfg config.Config, configPath string, logger *
 		openActionPending:    make(map[string]bool),
 		shortcutRand:         rand.New(rand.NewSource(time.Now().UnixNano())),
 		lastStatus:           offlineStatus(),
-		statusLine:           "Connecting to codex-buddy",
+		statusLine:           "Connecting to agent-buddy",
 		darkMode:             true,
 	}
 	gui.localRuntime = engine.NewRuntime(rootCfg, logger)
 	gui.localRuntime.Start(childCtx)
 	gui.localServer = engine.NewEmbeddedServer(gui.localRuntime, rootCfg, logger)
 
-	gui.fyneApp = app.NewWithID("github.com.vxider.codex-buddy.uconsole")
+	gui.fyneApp = app.NewWithID("github.com.vxider.agent-buddy.uconsole")
 	gui.applyTheme()
 	configuredServers := configuredServersFromConfig(rootCfg, gui.fyneApp.Preferences())
 	gui.replaceServers(configuredServers, false)
@@ -1078,7 +1078,7 @@ func Run(ctx context.Context, rootCfg config.Config, configPath string, logger *
 		}
 	}
 
-	gui.window = gui.fyneApp.NewWindow("codex-buddy uConsole")
+	gui.window = gui.fyneApp.NewWindow("agent-buddy uConsole")
 	gui.window.SetMaster()
 	width, height := normalizedWindowSize(cfg.Window.Width, cfg.Window.Height)
 	gui.window.Resize(fyne.NewSize(float32(width), float32(height)))
@@ -3298,7 +3298,7 @@ func summaryForState(state model.State, connected bool, lastError string) string
 	case "Error":
 		return "An error notification will pop up when intervention is needed."
 	default:
-		return "Waiting for remote codex-buddy state."
+		return "Waiting for remote agent-buddy state."
 	}
 }
 

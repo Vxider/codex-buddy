@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"log"
 
-	"github.com/vxider/codex-buddy/internal/config"
+	"github.com/vxider/agent-buddy/internal/config"
 )
 
 func Run(_ context.Context, _ config.Config, _ string, _ *log.Logger) error {

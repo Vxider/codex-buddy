@@ -1,4 +1,4 @@
-# codex-buddy software plan
+# agent-buddy software plan
 
 > This is the implementation-focused companion to the architecture notes. It documents the current passive-monitoring direction rather than a speculative full control plane.
 
@@ -34,7 +34,7 @@ Use one binary with several narrow commands:
 ## Data flow
 
 1. Codex hook fires.
-2. `codex-buddy hook` reads JSON from stdin.
+2. `agent-buddy hook` reads JSON from stdin.
 3. The hook command forwards the event to the local daemon.
 4. The daemon updates session state.
 5. If a transcript path is available, the daemon watches the JSONL file for richer updates.

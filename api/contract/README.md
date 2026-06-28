@@ -1,4 +1,4 @@
-# Codex Buddy API Contract
+# Agent Buddy API Contract
 
 This directory contains stable JSON fixtures for client implementations.
 

@@ -5,7 +5,7 @@
 	<key>CFBundleDevelopmentRegion</key>
 	<string>$(DEVELOPMENT_LANGUAGE)</string>
 	<key>CFBundleDisplayName</key>
-	<string>Codex Buddy</string>
+	<string>Agent Buddy</string>
 	<key>CFBundleExecutable</key>
 	<string>$(EXECUTABLE_NAME)</string>
 	<key>CFBundleIdentifier</key>
@@ -22,16 +22,16 @@
 	<array>
 		<dict>
 			<key>CFBundleURLName</key>
-			<string>com.vxider.codexbuddy</string>
+			<string>com.vxider.agentbuddy</string>
 			<key>CFBundleURLSchemes</key>
 			<array>
-				<string>codexbuddy</string>
+				<string>agentbuddy</string>
 			</array>
 		</dict>
 	</array>
 	<key>CFBundleVersion</key>
 	<string>$(CURRENT_PROJECT_VERSION)</string>
-	<key>CodexBuddyBaseURL</key>
+	<key>AgentBuddyBaseURL</key>
 	<string></string>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>

@@ -3,13 +3,13 @@ package present
 import (
 	"testing"
 
-	"github.com/vxider/codex-buddy/internal/model"
+	"github.com/vxider/agent-buddy/internal/model"
 )
 
 func TestErrorSummaryPrefersCommandOverRawOutput(t *testing.T) {
 	session := model.SessionSnapshot{
 		LastBashCommand: "go test ./webserver/...",
-		LastError:       "FAIL\tgithub.com/vxider/codex-buddy/webserver/internal/api\t0.007s",
+		LastError:       "FAIL\tgithub.com/vxider/agent-buddy/webserver/internal/api\t0.007s",
 	}
 
 	got := ErrorSummary(session)

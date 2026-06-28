@@ -3,7 +3,7 @@ package uconsole
 import (
 	"time"
 
-	"github.com/vxider/codex-buddy/internal/model"
+	"github.com/vxider/agent-buddy/internal/model"
 )
 
 type StatusResponse struct {

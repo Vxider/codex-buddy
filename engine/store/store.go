@@ -10,8 +10,8 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/vxider/codex-buddy/engine/present"
-	"github.com/vxider/codex-buddy/internal/model"
+	"github.com/vxider/agent-buddy/engine/present"
+	"github.com/vxider/agent-buddy/internal/model"
 )
 
 type DiscoverySession struct {
@@ -61,7 +61,7 @@ func (s *Store) ApplyIngest(req model.IngestRequest) model.StatusSnapshot {
 
 	sessionID := req.Payload.SessionID
 	if sessionID == "" {
-		sessionID = "unknown"
+		sessionID = agentForIngest(req) + ":unknown"
 	}
 
 	session, ok := s.sessions[sessionID]
@@ -69,6 +69,7 @@ func (s *Store) ApplyIngest(req model.IngestRequest) model.StatusSnapshot {
 		session = &sessionState{
 			SessionSnapshot: model.SessionSnapshot{
 				SessionID: sessionID,
+				Agent:     agentForIngest(req),
 				State:     model.StateIdle,
 				UpdatedAt: req.ReceivedAt,
 			},
@@ -78,6 +79,7 @@ func (s *Store) ApplyIngest(req model.IngestRequest) model.StatusSnapshot {
 
 	previous := s.deriveSession(session.SessionSnapshot)
 
+	session.Agent = coalesce(session.Agent, agentForIngest(req))
 	session.TurnID = coalesce(req.Payload.TurnID, session.TurnID)
 	session.CWD = coalesce(req.Payload.CWD, session.CWD)
 	session.Model = coalesce(req.Payload.Model, session.Model)
@@ -179,7 +181,7 @@ func (s *Store) ApplyIngest(req model.IngestRequest) model.StatusSnapshot {
 
 	s.appendRecentEventLocked(model.RecentEvent{
 		Time:      req.ReceivedAt,
-		Source:    "hook",
+		Source:    coalesce(req.Source, agentForIngest(req)+"-hook", "hook"),
 		SessionID: sessionID,
 		EventName: event,
 		Summary:   summarizeHookEvent(req, session),
@@ -198,7 +200,7 @@ func (s *Store) ApplyTranscriptUpdate(update model.TranscriptUpdate) model.Statu
 
 	sessionID := update.SessionID
 	if sessionID == "" {
-		sessionID = "unknown"
+		sessionID = "codex:unknown"
 	}
 
 	session, ok := s.sessions[sessionID]
@@ -206,6 +208,7 @@ func (s *Store) ApplyTranscriptUpdate(update model.TranscriptUpdate) model.Statu
 		session = &sessionState{
 			SessionSnapshot: model.SessionSnapshot{
 				SessionID: sessionID,
+				Agent:     "codex",
 				State:     model.StateIdle,
 				UpdatedAt: update.UpdatedAt,
 			},
@@ -215,6 +218,7 @@ func (s *Store) ApplyTranscriptUpdate(update model.TranscriptUpdate) model.Statu
 
 	previous := s.deriveSession(session.SessionSnapshot)
 
+	session.Agent = coalesce(session.Agent, "codex")
 	session.TurnID = coalesce(update.TurnID, session.TurnID)
 	session.CWD = coalesce(update.CWD, session.CWD)
 	session.Model = coalesce(update.Model, session.Model)
@@ -316,6 +320,7 @@ func (s *Store) ApplyDiscovery(sessions []DiscoverySession, now time.Time) ([]st
 			current = &sessionState{
 				SessionSnapshot: model.SessionSnapshot{
 					SessionID: sessionID,
+					Agent:     "codex",
 					State:     model.StateIdle,
 					UpdatedAt: now,
 				},
@@ -324,6 +329,7 @@ func (s *Store) ApplyDiscovery(sessions []DiscoverySession, now time.Time) ([]st
 		}
 
 		previous := s.deriveSession(current.SessionSnapshot)
+		current.Agent = coalesce(current.Agent, "codex")
 		current.CWD = coalesce(discovered.CWD, current.CWD)
 		current.TranscriptPath = coalesce(discovered.TranscriptPath, current.TranscriptPath)
 		current.TmuxPane = coalesce(discovered.TmuxPane, current.TmuxPane)
@@ -541,7 +547,7 @@ func (s *Store) snapshotLocked() model.StatusSnapshot {
 	return snapshot
 }
 
-// reapDeadSessions removes sessions whose codex process has exited.
+// reapDeadSessions removes sessions whose known process has exited.
 // Sessions without a known PID are left untouched.
 func (s *Store) reapDeadSessions() {
 	s.mu.Lock()
@@ -573,7 +579,7 @@ func (s *Store) reapDeadSessions() {
 			Source:    "reaper",
 			SessionID: id,
 			EventName: "session_reaped",
-			Summary:   "codex process exited, session removed",
+			Summary:   strings.ToLower(agentDisplayName(session.Agent)) + " process exited, session removed",
 		})
 		if s.logger != nil {
 			s.logger.Printf("reaped dead session=%s pid=%d", id, session.codexPID)
@@ -928,7 +934,7 @@ func notificationTitle(session model.SessionSnapshot) string {
 	case model.StateError:
 		return present.ErrorTitle(session)
 	default:
-		return "Codex finished"
+		return agentDisplayName(session.Agent) + " finished"
 	}
 }
 
@@ -960,6 +966,39 @@ func canonicalEvent(values ...string) string {
 		return strings.ToLower(replacer.Replace(value))
 	}
 	return ""
+}
+
+func agentForIngest(req model.IngestRequest) string {
+	return canonicalAgent(firstNonEmptyRaw(req.Agent, req.Payload.Agent, req.Source))
+}
+
+func canonicalAgent(value string) string {
+	value = strings.ToLower(strings.TrimSpace(value))
+	switch {
+	case strings.Contains(value, "claude"):
+		return "claude"
+	case strings.Contains(value, "codex"), value == "":
+		return "codex"
+	default:
+		replacer := strings.NewReplacer(" ", "-", "_", "-")
+		return replacer.Replace(value)
+	}
+}
+
+func agentDisplayName(agent string) string {
+	switch canonicalAgent(agent) {
+	case "claude":
+		return "Claude"
+	case "codex":
+		return "Codex"
+	default:
+		trimmed := strings.TrimSpace(agent)
+		if trimmed == "" {
+			return "Agent"
+		}
+		runes := []rune(trimmed)
+		return strings.ToUpper(string(runes[0])) + string(runes[1:])
+	}
 }
 
 func preview(value string) string {

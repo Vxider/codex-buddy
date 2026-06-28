@@ -3,7 +3,7 @@ package uconsole
 import (
 	"strings"
 
-	"github.com/vxider/codex-buddy/internal/model"
+	"github.com/vxider/agent-buddy/internal/model"
 )
 
 func normalizeCompatState(state model.State) model.State {

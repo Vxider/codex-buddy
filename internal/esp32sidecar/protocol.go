@@ -5,7 +5,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/vxider/codex-buddy/internal/model"
+	"github.com/vxider/agent-buddy/internal/model"
 )
 
 const ProtocolVersion = 1

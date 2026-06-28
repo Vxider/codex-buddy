@@ -22,7 +22,7 @@
       "systemctl",
       "--user",
       "start",
-      "codex-buddy.service"
+      "agent-buddy.service"
     ]
   },
   "app_server": {
@@ -32,8 +32,8 @@
     ],
     "request_timeout_ms": 30000,
     "client_info": {
-      "name": "codex_buddy_debug",
-      "title": "codex-buddy Debug Client",
+      "name": "agent_buddy_debug",
+      "title": "agent-buddy Debug Client",
       "version": "0.1.0"
     }
   },

@@ -7,9 +7,9 @@
     {
       "session_id": "sess-running",
       "short_session_id": "sess-run",
-      "display_title": "codex-buddy",
-      "compact_title": "codex-buddy",
-      "micro_title": "codex-buddy",
+      "display_title": "agent-buddy",
+      "compact_title": "agent-buddy",
+      "micro_title": "agent-buddy",
       "state": "run",
       "state_detail": "running",
       "updated_at": "2026-04-22T12:00:03Z",

@@ -5,7 +5,7 @@ enum CodexDeepLink: Equatable {
     case serverSettings
 
     init?(url: URL) {
-        guard url.scheme?.lowercased() == "codexbuddy" else {
+        guard url.scheme?.lowercased() == "agentbuddy" else {
             return nil
         }
 

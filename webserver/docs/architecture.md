@@ -1,10 +1,10 @@
-# codex-buddy webserver architecture
+# agent-buddy webserver architecture
 
-> This document captures the architecture direction for the passive-monitoring `codex-buddy` server. The implementation has since converged into a single CLI with `serve` and `hook` subcommands, but the core design goals still apply.
+> This document captures the architecture direction for the passive-monitoring `agent-buddy` server. The implementation has since converged into a single CLI with `serve` and `hook` subcommands, but the core design goals still apply.
 
 ## Goals
 
-`codex-buddy` is not meant to replace Codex CLI. Its job is to provide a stable state bridge on the same machine that runs Codex CLI so local and remote clients can observe current session state and drive UI or hardware.
+`agent-buddy` is not meant to replace Codex CLI. Its job is to provide a stable state bridge on the same machine that runs Codex CLI so local and remote clients can observe current session state and drive UI or hardware.
 
 The current design goals are:
 
@@ -16,12 +16,12 @@ The current design goals are:
 
 ## Recommended runtime split
 
-Keep a single `codex-buddy` binary, but split responsibility between two roles:
+Keep a single `agent-buddy` binary, but split responsibility between two roles:
 
-1. `codex-buddy hook`
+1. `agent-buddy hook`
    - Lightweight helper invoked by Codex hooks.
    - Ensures the server is running and forwards events quickly.
-2. `codex-buddy serve`
+2. `agent-buddy serve`
    - Long-running daemon/webserver on the Codex host.
    - Owns status aggregation, transcript watching, HTTP/SSE APIs, and client broadcast.
 
@@ -63,14 +63,14 @@ Recommended roadmap:
 
 - Codex CLI runs normally on the remote machine, typically inside SSH + tmux.
 - Codex hooks fire at important lifecycle events.
-- All hook commands point to `codex-buddy hook`.
+- All hook commands point to `agent-buddy hook`.
 
-### `codex-buddy hook`
+### `agent-buddy hook`
 
 Responsibilities:
 
 - receive hook JSON from standard input
-- check whether `codex-buddy serve` is alive locally
+- check whether `agent-buddy serve` is alive locally
 - start `serve` in the background when needed
 - forward events to the daemon over loopback HTTP or a local socket
 - exit quickly so Codex itself is not delayed
@@ -81,7 +81,7 @@ Design rules:
 - `hook` does not do deep parsing
 - `hook` only wakes and delivers
 
-### `codex-buddy serve`
+### `agent-buddy serve`
 
 Responsibilities:
 

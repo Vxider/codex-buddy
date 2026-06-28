@@ -138,7 +138,7 @@ func ResolvePath(path string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("resolve user home: %w", err)
 	}
-	return filepath.Join(home, ".config", "codex-buddy", "config.json"), nil
+	return filepath.Join(home, ".config", "agent-buddy", "config.json"), nil
 }
 
 func Default() Config {
@@ -168,8 +168,8 @@ func Default() Config {
 			Command:          []string{"codex", "app-server"},
 			RequestTimeoutMS: 30000,
 			ClientInfo: ClientInfoConfig{
-				Name:    "codex_buddy_debug",
-				Title:   "codex-buddy Debug Client",
+				Name:    "agent_buddy_debug",
+				Title:   "agent-buddy Debug Client",
 				Version: "0.1.0",
 			},
 		},
@@ -211,10 +211,10 @@ func applyDefaults(cfg *Config) {
 		cfg.AppServer.RequestTimeoutMS = 30000
 	}
 	if cfg.AppServer.ClientInfo.Name == "" {
-		cfg.AppServer.ClientInfo.Name = "codex_buddy_debug"
+		cfg.AppServer.ClientInfo.Name = "agent_buddy_debug"
 	}
 	if cfg.AppServer.ClientInfo.Title == "" {
-		cfg.AppServer.ClientInfo.Title = "codex-buddy Debug Client"
+		cfg.AppServer.ClientInfo.Title = "agent-buddy Debug Client"
 	}
 	if cfg.AppServer.ClientInfo.Version == "" {
 		cfg.AppServer.ClientInfo.Version = "0.1.0"

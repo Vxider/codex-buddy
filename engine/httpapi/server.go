@@ -13,12 +13,12 @@ import (
 	"strings"
 	"time"
 
-	"github.com/vxider/codex-buddy/engine/control"
-	"github.com/vxider/codex-buddy/engine/present"
-	"github.com/vxider/codex-buddy/engine/store"
-	"github.com/vxider/codex-buddy/engine/transcript"
-	"github.com/vxider/codex-buddy/internal/config"
-	"github.com/vxider/codex-buddy/internal/model"
+	"github.com/vxider/agent-buddy/engine/control"
+	"github.com/vxider/agent-buddy/engine/present"
+	"github.com/vxider/agent-buddy/engine/store"
+	"github.com/vxider/agent-buddy/engine/transcript"
+	"github.com/vxider/agent-buddy/internal/config"
+	"github.com/vxider/agent-buddy/internal/model"
 	"github.com/yuin/goldmark"
 	"github.com/yuin/goldmark/extension"
 	gmhtml "github.com/yuin/goldmark/renderer/html"
@@ -35,6 +35,7 @@ type Server struct {
 }
 
 type publicSession struct {
+	Agent           string               `json:"agent,omitempty"`
 	SessionID       string               `json:"session_id"`
 	ShortSessionID  string               `json:"short_session_id,omitempty"`
 	DisplayTitle    string               `json:"display_title,omitempty"`
@@ -423,6 +424,7 @@ func (s *Server) publicSession(session model.SessionSnapshot, notification model
 		openReason = classifyOpenReason(openText)
 	}
 	item := publicSession{
+		Agent:           session.Agent,
 		SessionID:       session.SessionID,
 		ShortSessionID:  shortSessionID(session.SessionID),
 		DisplayTitle:    titles.Display,
@@ -1151,7 +1153,7 @@ var debugPageHTML = `<!doctype html>
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>codex-buddy status</title>
+  <title>agent-buddy status</title>
   <style>
     body { font-family: ui-sans-serif, system-ui, sans-serif; margin: 24px; background: #121212; color: #edf2f7; }
     .wrap { max-width: 760px; margin: 0 auto; }
@@ -1183,7 +1185,7 @@ var debugPageHTML = `<!doctype html>
 <body>
   <div class="wrap">
     <div class="card" style="margin-top:16px;">
-      <h1>codex-buddy Status</h1>
+      <h1>agent-buddy Status</h1>
       <div class="summary">
         <div>
           <div class="muted">aggregate status</div>
@@ -1248,6 +1250,7 @@ var debugPageHTML = `<!doctype html>
         const detail = session.open_summary || session.summary || '';
         const detailHTML = stripLinks(session.open_summary_html || session.summary_html || '');
         const meta = [];
+        if (session.agent) meta.push(session.agent);
         if (session.short_session_id) meta.push(session.short_session_id);
         if (session.updated_at) meta.push(session.updated_at);
         if (session.needs_approval) meta.push('approval pending');
@@ -1288,7 +1291,7 @@ var codexDisabledPageHTML = `<!doctype html>
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>codex-buddy passive mode</title>
+  <title>agent-buddy passive mode</title>
   <style>
     body { font-family: ui-sans-serif, system-ui, sans-serif; margin: 24px; background: #121212; color: #edf2f7; }
     .wrap { max-width: 720px; margin: 0 auto; }

@@ -13,12 +13,12 @@ import (
 	"strings"
 	"time"
 
-	"github.com/vxider/codex-buddy/internal/config"
-	"github.com/vxider/codex-buddy/internal/model"
-	"github.com/vxider/codex-buddy/webserver/internal/control"
-	"github.com/vxider/codex-buddy/webserver/internal/present"
-	"github.com/vxider/codex-buddy/webserver/internal/store"
-	"github.com/vxider/codex-buddy/webserver/internal/transcript"
+	"github.com/vxider/agent-buddy/internal/config"
+	"github.com/vxider/agent-buddy/internal/model"
+	"github.com/vxider/agent-buddy/webserver/internal/control"
+	"github.com/vxider/agent-buddy/webserver/internal/present"
+	"github.com/vxider/agent-buddy/webserver/internal/store"
+	"github.com/vxider/agent-buddy/webserver/internal/transcript"
 	"github.com/yuin/goldmark"
 	"github.com/yuin/goldmark/extension"
 	gmhtml "github.com/yuin/goldmark/renderer/html"
@@ -1168,7 +1168,7 @@ var debugPageHTML = `<!doctype html>
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>codex-buddy status</title>
+  <title>agent-buddy status</title>
   <style>
     body { font-family: ui-sans-serif, system-ui, sans-serif; margin: 24px; background: #121212; color: #edf2f7; }
     .wrap { max-width: 760px; margin: 0 auto; }
@@ -1200,7 +1200,7 @@ var debugPageHTML = `<!doctype html>
 <body>
   <div class="wrap">
     <div class="card" style="margin-top:16px;">
-      <h1>codex-buddy Status</h1>
+      <h1>agent-buddy Status</h1>
       <div class="summary">
         <div>
           <div class="muted">aggregate status</div>
@@ -1305,7 +1305,7 @@ var codexDisabledPageHTML = `<!doctype html>
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>codex-buddy passive mode</title>
+  <title>agent-buddy passive mode</title>
   <style>
     body { font-family: ui-sans-serif, system-ui, sans-serif; margin: 24px; background: #121212; color: #edf2f7; }
     .wrap { max-width: 720px; margin: 0 auto; }

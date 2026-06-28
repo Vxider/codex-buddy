@@ -5,8 +5,8 @@ SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 UCONSOLE_DIR="$(cd -- "${SCRIPT_DIR}/.." && pwd)"
 
 SERVER_URL="${1:-http://127.0.0.1:8787}"
-BIN_PATH="${UCONSOLE_DIR}/bin/codex-buddy-wayland"
-HOME_BASE="${TMPDIR:-/tmp}/codex-buddy-home"
+BIN_PATH="${UCONSOLE_DIR}/bin/agent-buddy-wayland"
+HOME_BASE="${TMPDIR:-/tmp}/agent-buddy-home"
 
 mkdir -p "${HOME_BASE}/.config" "${HOME_BASE}/.cache" "${HOME_BASE}/.local/share"
 

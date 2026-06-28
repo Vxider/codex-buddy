@@ -1,0 +1,11 @@
+[Unit]
+Description=agent-buddy daemon
+After=default.target
+
+[Service]
+ExecStart=%h/.local/bin/agent-buddy serve --config %h/.config/agent-buddy/config.json
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=default.target

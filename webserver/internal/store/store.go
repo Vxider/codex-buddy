@@ -10,8 +10,8 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/vxider/codex-buddy/internal/model"
-	"github.com/vxider/codex-buddy/webserver/internal/present"
+	"github.com/vxider/agent-buddy/internal/model"
+	"github.com/vxider/agent-buddy/webserver/internal/present"
 )
 
 type Store struct {

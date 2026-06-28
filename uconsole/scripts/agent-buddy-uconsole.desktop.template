@@ -1,0 +1,11 @@
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name=Agent Buddy uConsole
+Comment=Agent Buddy desktop console
+Exec=__BIN_TARGET__ --server-url __SERVER_URL__
+Icon=__ICON_TARGET__
+Terminal=false
+Categories=Utility;Development;
+StartupNotify=true
+StartupWMClass=github.com.vxider.agent-buddy.uconsole

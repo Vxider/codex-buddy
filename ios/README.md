@@ -1,11 +1,11 @@
-# Codex Buddy iPhone + Apple Watch
+# Agent Buddy iPhone + Apple Watch
 
-This directory contains the first public-source version of the iPhone and Apple Watch companion for `codex-buddy`.
+This directory contains the first public-source version of the iPhone and Apple Watch companion for `agent-buddy`.
 
 ## Layout
 
 - `AppCore/`: shared models, JSON decoding, snapshot storage, deep links, and the HTTP client for `/v1/status` and `/v1/sessions/{id}/continue`
-- `PhoneApp/`: the iPhone app that talks directly to the `codex-buddy` webserver
+- `PhoneApp/`: the iPhone app that talks directly to the `agent-buddy` webserver
 - `WatchApp/`: the watchOS foreground app that refreshes through `WatchConnectivity` and proxies `continue` through the iPhone app
 - `WatchWidget/`: the accessory circular watch widget that renders the cached aggregate state
 - `project.yml`: XcodeGen specification for the iPhone app, watch app, and widget extension
@@ -22,7 +22,7 @@ This directory contains the first public-source version of the iPhone and Apple 
 1. Install XcodeGen on macOS: `brew install xcodegen`
 2. Copy `project.local.env.example` to `project.local.env` and set your Apple Developer team there
 3. Run `./generate-project.sh`
-4. Open `CodexBuddy.xcodeproj` in Xcode
+4. Open `AgentBuddy.xcodeproj` in Xcode
 5. Confirm that the shared App Group is available for your signing setup; if not, temporarily fall back to `.standard` storage in `CodexSnapshotStore`
 
 `project.local.env` is intentionally untracked and is loaded before `xcodegen` runs, so regenerating the project does not wipe your local signing configuration.
@@ -34,10 +34,10 @@ This directory contains the first public-source version of the iPhone and Apple 
 
 ## Runtime model
 
-- The iPhone app is the only client that talks directly to the `codex-buddy` webserver
+- The iPhone app is the only client that talks directly to the `agent-buddy` webserver
 - The watch app talks to the iPhone app over `WatchConnectivity`
 - The widget only shows the last cached aggregate state; interactive work happens in the watch foreground app
-- The shared deep-link scheme is `codexbuddy://sessions`
+- The shared deep-link scheme is `agentbuddy://sessions`
 
 ## Current limitations
 

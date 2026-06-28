@@ -7,15 +7,15 @@ import (
 	"log"
 	"os"
 
-	"github.com/vxider/codex-buddy/internal/config"
-	"github.com/vxider/codex-buddy/uconsole"
+	"github.com/vxider/agent-buddy/internal/config"
+	"github.com/vxider/agent-buddy/uconsole"
 )
 
 func Run(args []string) int {
 	fs := flag.NewFlagSet("uconsole", flag.ExitOnError)
 	var configPath string
 	var serverURL string
-	fs.StringVar(&configPath, "config", "", "Path to codex-buddy JSON config")
+	fs.StringVar(&configPath, "config", "", "Path to agent-buddy JSON config")
 	fs.StringVar(&serverURL, "server-url", "", "Override uConsole buddy server URL")
 	_ = fs.Parse(args)
 
@@ -33,7 +33,7 @@ func Run(args []string) int {
 		cfg.UConsole.ServerURL = serverURL
 	}
 
-	logger := log.New(os.Stdout, "codex-buddy-uconsole: ", log.LstdFlags|log.Lmsgprefix)
+	logger := log.New(os.Stdout, "agent-buddy-uconsole: ", log.LstdFlags|log.Lmsgprefix)
 	if err := uconsole.Run(context.Background(), cfg, resolvedConfigPath, logger); err != nil {
 		logger.Printf("uconsole failed: %v", err)
 		return 1

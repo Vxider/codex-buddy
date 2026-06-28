@@ -1,0 +1,343 @@
+package main
+
+import (
+	"encoding/json"
+	"fmt"
+	"io"
+	"os"
+	"path/filepath"
+	"strings"
+
+	"github.com/vxider/agent-buddy/internal/config"
+)
+
+func installSelf(binPath string) error {
+	binDir := filepath.Dir(binPath)
+	if err := os.MkdirAll(binDir, 0o755); err != nil {
+		return err
+	}
+
+	selfPath, err := os.Executable()
+	if err != nil {
+		return err
+	}
+
+	src, err := os.Open(selfPath)
+	if err != nil {
+		return err
+	}
+	defer src.Close()
+
+	tmp, err := os.CreateTemp(binDir, ".agent-buddy.install.*")
+	if err != nil {
+		return err
+	}
+	tmpPath := tmp.Name()
+	defer func() {
+		_ = os.Remove(tmpPath)
+	}()
+
+	if _, err := io.Copy(tmp, src); err != nil {
+		_ = tmp.Close()
+		return err
+	}
+	if err := tmp.Chmod(0o755); err != nil {
+		_ = tmp.Close()
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+	if err := os.Rename(tmpPath, binPath); err != nil {
+		return err
+	}
+	return nil
+}
+
+func writeConfigJSON(path string, cfg config.Config) error {
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return err
+	}
+	data, err := json.MarshalIndent(cfg, "", "  ")
+	if err != nil {
+		return err
+	}
+	data = append(data, '\n')
+	return os.WriteFile(path, data, 0o600)
+}
+
+const (
+	agentBuddyHooksBegin = "# BEGIN agent-buddy hooks"
+	agentBuddyHooksEnd   = "# END agent-buddy hooks"
+)
+
+func writeCodexHooksConfig(path, binPath, configPath string) error {
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return err
+	}
+
+	command := func(event string) string {
+		return shellQuote(binPath) + " hook " + event + " --config " + shellQuote(configPath)
+	}
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if !os.IsNotExist(err) {
+			return err
+		}
+	}
+
+	content := removeManagedHooksBlock(string(data))
+	hooks := strings.TrimSpace(fmt.Sprintf(`
+%s
+[[hooks.SessionStart]]
+matcher = "startup|resume"
+hooks = [{ type = "command", command = %s, statusMessage = "agent-buddy session-start" }]
+
+[[hooks.UserPromptSubmit]]
+hooks = [{ type = "command", command = %s }]
+
+[[hooks.PreToolUse]]
+matcher = "Bash"
+hooks = [{ type = "command", command = %s }]
+
+[[hooks.PermissionRequest]]
+hooks = [{ type = "command", command = %s, statusMessage = "agent-buddy permission-request" }]
+
+[[hooks.PostToolUse]]
+matcher = "Bash"
+hooks = [{ type = "command", command = %s }]
+
+[[hooks.Stop]]
+hooks = [{ type = "command", command = %s }]
+%s
+`, agentBuddyHooksBegin, tomlQuote(command("session-start")), tomlQuote(command("user-prompt-submit")), tomlQuote(command("pre-tool-use")), tomlQuote(command("permission-request")), tomlQuote(command("post-tool-use")), tomlQuote(command("stop")), agentBuddyHooksEnd))
+
+	content = strings.TrimRight(content, "\n")
+	if content != "" {
+		content += "\n\n"
+	}
+	content += hooks + "\n"
+	return os.WriteFile(path, []byte(content), 0o600)
+}
+
+func claudeHooksSnippet(binPath, configPath string) string {
+	command := func(event string) string {
+		return shellQuote(binPath) + " claude-hook " + event + " --config " + shellQuote(configPath)
+	}
+
+	return strings.TrimSpace(fmt.Sprintf(`
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": %s
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": %s
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": %s
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": %s
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": %s
+          }
+        ]
+      }
+    ]
+  }
+}
+`, jsonQuote(command("session-start")), jsonQuote(command("user-prompt-submit")), jsonQuote(command("pre-tool-use")), jsonQuote(command("post-tool-use")), jsonQuote(command("stop"))))
+}
+
+func writeServiceFile(path, configPath string) error {
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return err
+	}
+	content := strings.TrimSpace(fmt.Sprintf(`
+[Unit]
+Description=agent-buddy daemon
+After=default.target
+
+[Service]
+ExecStart=%%h/.local/bin/agent-buddy serve --config %s
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=default.target
+`, configPath)) + "\n"
+	return os.WriteFile(path, []byte(content), 0o644)
+}
+
+func removeLegacyAgentBuddyHooks(path string) error {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
+	}
+
+	var config legacyHooksConfig
+	if err := json.Unmarshal(data, &config); err != nil {
+		if containsBuddyHookCommand(string(data)) {
+			return os.Remove(path)
+		}
+		return nil
+	}
+
+	changed := false
+	for event, matchers := range config.Hooks {
+		keptMatchers := matchers[:0]
+		for _, matcher := range matchers {
+			keptHooks := matcher.Hooks[:0]
+			for _, hook := range matcher.Hooks {
+				if isLegacyAgentBuddyHookCommand(hook.Command) {
+					changed = true
+					continue
+				}
+				keptHooks = append(keptHooks, hook)
+			}
+			matcher.Hooks = keptHooks
+			if len(matcher.Hooks) > 0 {
+				keptMatchers = append(keptMatchers, matcher)
+			}
+		}
+		if len(keptMatchers) == 0 {
+			delete(config.Hooks, event)
+			continue
+		}
+		config.Hooks[event] = keptMatchers
+	}
+
+	if !changed {
+		return nil
+	}
+	if len(config.Hooks) == 0 {
+		return os.Remove(path)
+	}
+	updated, err := json.MarshalIndent(config, "", "  ")
+	if err != nil {
+		return err
+	}
+	updated = append(updated, '\n')
+	return os.WriteFile(path, updated, 0o600)
+}
+
+type legacyHooksConfig struct {
+	Hooks map[string][]legacyHookMatcher `json:"hooks,omitempty"`
+}
+
+type legacyHookMatcher struct {
+	Matcher string              `json:"matcher,omitempty"`
+	Hooks   []legacyHookCommand `json:"hooks,omitempty"`
+}
+
+type legacyHookCommand struct {
+	Type          string `json:"type,omitempty"`
+	Command       string `json:"command,omitempty"`
+	StatusMessage string `json:"statusMessage,omitempty"`
+}
+
+func isLegacyAgentBuddyHookCommand(command string) bool {
+	command = strings.TrimSpace(command)
+	if command == "" {
+		return false
+	}
+	return containsBuddyHookCommand(command)
+}
+
+func removeAgentBuddyHooksConfig(path string) error {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
+	}
+	content := removeManagedHooksBlock(string(data))
+	return os.WriteFile(path, []byte(strings.TrimRight(content, "\n")+"\n"), 0o600)
+}
+
+func managedHooksBlock(content string) string {
+	start := strings.Index(content, agentBuddyHooksBegin)
+	end := strings.Index(content, agentBuddyHooksEnd)
+	if start < 0 || end < start {
+		return ""
+	}
+	end += len(agentBuddyHooksEnd)
+	if end < len(content) && content[end] == '\n' {
+		end++
+	}
+	return content[start:end]
+}
+
+func removeManagedHooksBlock(content string) string {
+	start := strings.Index(content, agentBuddyHooksBegin)
+	end := strings.Index(content, agentBuddyHooksEnd)
+	if start < 0 || end < start {
+		return content
+	}
+	end += len(agentBuddyHooksEnd)
+	if end < len(content) && content[end] == '\n' {
+		end++
+	}
+	return strings.TrimRight(content[:start], "\n") + content[end:]
+}
+
+func containsBuddyHookCommand(command string) bool {
+	return strings.Contains(command, "agent-buddy") && strings.Contains(command, " hook ")
+}
+
+func shellQuote(value string) string {
+	return "'" + strings.ReplaceAll(value, "'", `'\''`) + "'"
+}
+
+func tomlQuote(value string) string {
+	encoded, err := json.Marshal(value)
+	if err != nil {
+		return `""`
+	}
+	return string(encoded)
+}
+
+func jsonQuote(value string) string {
+	return tomlQuote(value)
+}

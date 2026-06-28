@@ -3,14 +3,14 @@ package present
 import (
 	"strings"
 
-	"github.com/vxider/codex-buddy/internal/model"
+	"github.com/vxider/agent-buddy/internal/model"
 )
 
 func ErrorTitle(session model.SessionSnapshot) string {
 	if strings.TrimSpace(session.LastBashCommand) != "" {
 		return "Command failed"
 	}
-	return "Codex error"
+	return AgentDisplayName(session.Agent) + " error"
 }
 
 func ErrorSummary(session model.SessionSnapshot) string {
@@ -28,7 +28,19 @@ func ErrorSummary(session model.SessionSnapshot) string {
 	if prompt := normalizeInlineWhitespace(session.LastUserPromptPreview); prompt != "" {
 		return "Request failed while working on: " + clipHead(prompt, 120)
 	}
-	return "Codex run failed"
+	return AgentDisplayName(session.Agent) + " run failed"
+}
+
+func AgentDisplayName(agent string) string {
+	switch strings.ToLower(strings.TrimSpace(agent)) {
+	case "claude":
+		return "Claude"
+	case "codex", "":
+		return "Codex"
+	default:
+		trimmed := strings.TrimSpace(agent)
+		return strings.ToUpper(string([]rune(trimmed)[0])) + string([]rune(trimmed)[1:])
+	}
 }
 
 func readableErrorText(value string) string {

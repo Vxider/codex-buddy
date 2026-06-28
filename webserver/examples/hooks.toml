@@ -1,24 +1,24 @@
 # Add this block to ~/.codex/config.toml.
 
-# BEGIN codex-buddy hooks
+# BEGIN agent-buddy hooks
 [[hooks.SessionStart]]
 matcher = "startup|resume"
-hooks = [{ type = "command", command = "~/.local/bin/codex-buddy hook session-start --config ~/.config/codex-buddy/config.json", statusMessage = "codex-buddy session-start" }]
+hooks = [{ type = "command", command = "~/.local/bin/agent-buddy hook session-start --config ~/.config/agent-buddy/config.json", statusMessage = "agent-buddy session-start" }]
 
 [[hooks.UserPromptSubmit]]
-hooks = [{ type = "command", command = "~/.local/bin/codex-buddy hook user-prompt-submit --config ~/.config/codex-buddy/config.json" }]
+hooks = [{ type = "command", command = "~/.local/bin/agent-buddy hook user-prompt-submit --config ~/.config/agent-buddy/config.json" }]
 
 [[hooks.PreToolUse]]
 matcher = "Bash"
-hooks = [{ type = "command", command = "~/.local/bin/codex-buddy hook pre-tool-use --config ~/.config/codex-buddy/config.json" }]
+hooks = [{ type = "command", command = "~/.local/bin/agent-buddy hook pre-tool-use --config ~/.config/agent-buddy/config.json" }]
 
 [[hooks.PermissionRequest]]
-hooks = [{ type = "command", command = "~/.local/bin/codex-buddy hook permission-request --config ~/.config/codex-buddy/config.json", statusMessage = "codex-buddy permission-request" }]
+hooks = [{ type = "command", command = "~/.local/bin/agent-buddy hook permission-request --config ~/.config/agent-buddy/config.json", statusMessage = "agent-buddy permission-request" }]
 
 [[hooks.PostToolUse]]
 matcher = "Bash"
-hooks = [{ type = "command", command = "~/.local/bin/codex-buddy hook post-tool-use --config ~/.config/codex-buddy/config.json" }]
+hooks = [{ type = "command", command = "~/.local/bin/agent-buddy hook post-tool-use --config ~/.config/agent-buddy/config.json" }]
 
 [[hooks.Stop]]
-hooks = [{ type = "command", command = "~/.local/bin/codex-buddy hook stop --config ~/.config/codex-buddy/config.json" }]
-# END codex-buddy hooks
+hooks = [{ type = "command", command = "~/.local/bin/agent-buddy hook stop --config ~/.config/agent-buddy/config.json" }]
+# END agent-buddy hooks

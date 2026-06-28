@@ -9,8 +9,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/vxider/codex-buddy/engine/httpapi"
-	"github.com/vxider/codex-buddy/internal/config"
+	"github.com/vxider/agent-buddy/engine/httpapi"
+	"github.com/vxider/agent-buddy/internal/config"
 )
 
 type EmbeddedServer struct {

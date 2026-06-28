@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/vxider/codex-buddy/internal/model"
+	"github.com/vxider/agent-buddy/internal/model"
 )
 
 const ledStatusStaleAfter = 60 * time.Second
@@ -49,7 +49,7 @@ func writeCodexLEDStatus(state codexLEDState, connected bool) error {
 		State:     state,
 		UpdatedAt: float64(time.Now().UnixNano()) / float64(time.Second),
 		Connected: connected,
-		Source:    "codex-buddy",
+		Source:    "agent-buddy",
 	}
 	data, err := json.MarshalIndent(payload, "", "  ")
 	if err != nil {

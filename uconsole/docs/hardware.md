@@ -1,6 +1,6 @@
 # uConsole hardware notes
 
-This document summarizes the hardware assumptions behind the uConsole companion setup used by `codex-buddy`.
+This document summarizes the hardware assumptions behind the uConsole companion setup used by `agent-buddy`.
 
 ## Purpose
 
@@ -18,7 +18,7 @@ Typical responsibilities:
 The project has been developed around a CM5-based uConsole-style setup with:
 
 - Linux-based handheld host
-- local `codex-buddy` or remote access over an internal network
+- local `agent-buddy` or remote access over an internal network
 - optional USB-connected ESP32 for sensors or simple sidecar I/O
 - optional external keyboard shortcuts for acknowledge/continue flows
 

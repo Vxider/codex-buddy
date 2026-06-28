@@ -18,4 +18,4 @@ fi
 
 xcodegen generate --spec "$specs"
 
-echo "Generated ios/CodexBuddy.xcodeproj"
+echo "Generated ios/AgentBuddy.xcodeproj"

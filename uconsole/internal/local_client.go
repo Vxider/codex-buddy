@@ -13,10 +13,10 @@ import (
 	"net/url"
 	"strings"
 
-	"github.com/vxider/codex-buddy/engine"
-	"github.com/vxider/codex-buddy/engine/httpapi"
-	"github.com/vxider/codex-buddy/internal/config"
-	"github.com/vxider/codex-buddy/internal/model"
+	"github.com/vxider/agent-buddy/engine"
+	"github.com/vxider/agent-buddy/engine/httpapi"
+	"github.com/vxider/agent-buddy/internal/config"
+	"github.com/vxider/agent-buddy/internal/model"
 )
 
 type statusClient interface {

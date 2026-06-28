@@ -12,9 +12,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/vxider/codex-buddy/internal/config"
-	"github.com/vxider/codex-buddy/internal/model"
-	"github.com/vxider/codex-buddy/webserver/internal/store"
+	"github.com/vxider/agent-buddy/internal/config"
+	"github.com/vxider/agent-buddy/internal/model"
+	"github.com/vxider/agent-buddy/webserver/internal/store"
 )
 
 type stubContinueExecutor struct {
@@ -820,7 +820,7 @@ func TestStatusErrorSummaryPrefersReadableCommandFailure(t *testing.T) {
 	st.ApplyTranscriptUpdate(model.TranscriptUpdate{
 		SessionID:       "sess-error",
 		LastBashCommand: "go test ./webserver/...",
-		Error:           "FAIL\tgithub.com/vxider/codex-buddy/webserver/internal/api\t0.007s",
+		Error:           "FAIL\tgithub.com/vxider/agent-buddy/webserver/internal/api\t0.007s",
 		UpdatedAt:       now.Add(time.Second),
 	})
 	st.ApplyIngest(model.IngestRequest{
@@ -828,7 +828,7 @@ func TestStatusErrorSummaryPrefersReadableCommandFailure(t *testing.T) {
 		ReceivedAt: now.Add(2 * time.Second),
 		Payload: model.HookPayload{
 			SessionID: "sess-error",
-			Error:     "FAIL\tgithub.com/vxider/codex-buddy/webserver/internal/api\t0.007s",
+			Error:     "FAIL\tgithub.com/vxider/agent-buddy/webserver/internal/api\t0.007s",
 			TmuxPane:  "%44",
 		},
 	})

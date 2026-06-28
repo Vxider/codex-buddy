@@ -10,7 +10,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/vxider/codex-buddy/internal/config"
+	"github.com/vxider/agent-buddy/internal/config"
 )
 
 type continueOKFixture struct {

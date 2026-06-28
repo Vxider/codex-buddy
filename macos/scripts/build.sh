@@ -16,4 +16,4 @@ fi
 
 cd "${MACOS_DIR}"
 xcodegen generate
-xcodebuild -scheme CodexBuddyMenuBar -configuration Release build
+xcodebuild -scheme AgentBuddyMenuBar -configuration Release build

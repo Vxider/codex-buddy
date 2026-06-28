@@ -1,4 +1,4 @@
-module github.com/vxider/codex-buddy
+module github.com/vxider/agent-buddy
 
 go 1.24.0
 
