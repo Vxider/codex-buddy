@@ -123,7 +123,7 @@ hooks = [{ type = "command", command = %s }]
 
 func claudeHooksSnippet(binPath, configPath string) string {
 	command := func(event string) string {
-		return shellQuote(binPath) + " claude-hook " + event + " --config " + shellQuote(configPath)
+		return binPath + " claude-hook " + event + " --config " + configPath
 	}
 
 	return strings.TrimSpace(fmt.Sprintf(`
@@ -323,7 +323,7 @@ func removeManagedHooksBlock(content string) string {
 }
 
 func containsBuddyHookCommand(command string) bool {
-	return strings.Contains(command, "agent-buddy") && strings.Contains(command, " hook ")
+	return strings.Contains(command, "agent-buddy") && (strings.Contains(command, " hook ") || strings.Contains(command, " claude-hook "))
 }
 
 func shellQuote(value string) string {

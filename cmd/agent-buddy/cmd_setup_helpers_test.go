@@ -78,6 +78,24 @@ func TestIsPermissionRequestEvent(t *testing.T) {
 	}
 }
 
+func TestClaudeHooksSnippetUsesPlainAbsoluteCommands(t *testing.T) {
+	content := claudeHooksSnippet("/tmp/bin/agent-buddy", "/tmp/agent-buddy/config.json")
+
+	if !strings.Contains(content, `"command": "/tmp/bin/agent-buddy claude-hook user-prompt-submit --config /tmp/agent-buddy/config.json"`) {
+		t.Fatalf("expected plain claude hook command, got:\n%s", content)
+	}
+	if strings.Contains(content, `'/tmp/bin/agent-buddy'`) || strings.Contains(content, `'/tmp/agent-buddy/config.json'`) {
+		t.Fatalf("expected claude hook command without shell quotes, got:\n%s", content)
+	}
+}
+
+func TestContainsBuddyHookCommandMatchesClaudeHook(t *testing.T) {
+	command := "/tmp/bin/agent-buddy claude-hook user-prompt-submit --config /tmp/config.json"
+	if !containsBuddyHookCommand(command) {
+		t.Fatalf("expected claude-hook command to match")
+	}
+}
+
 func TestRemoveLegacyAgentBuddyHooksDeletesOldAgentBuddyFile(t *testing.T) {
 	dir := t.TempDir()
 	hooksPath := filepath.Join(dir, "hooks.json")
@@ -138,7 +156,7 @@ func TestRemoveLegacyAgentBuddyHooksPrunesOnlyAgentBuddyEntries(t *testing.T) {
         "hooks": [
           {
             "type": "command",
-            "command": "'/tmp/bin/agent-buddy' hook user-prompt-submit --config '/tmp/config.json'"
+            "command": "'/tmp/bin/agent-buddy' claude-hook user-prompt-submit --config '/tmp/config.json'"
           }
         ]
       }
