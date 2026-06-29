@@ -48,6 +48,11 @@ type tmuxDotState struct {
 	UpdatedAt     time.Time `json:"updated_at"`
 }
 
+const (
+	// Keep a running dot across brief status fetch misses, but avoid stale tabs.
+	tmuxDotRunningFallbackTTL = 10 * time.Second
+)
+
 func runTmuxWindowDot(args []string) int {
 	fs := flag.NewFlagSet("tmux-window-dot", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
@@ -78,23 +83,24 @@ func runTmuxWindowDot(args []string) int {
 		activeWindowID = tmuxDisplayValue("", "#{window_id}")
 	}
 
+	now := time.Now().UTC()
 	status, err := fetchStatusWithTimeout(cfg, time.Duration(timeoutMS)*time.Millisecond)
 	if err != nil {
+		dotState, err := loadTmuxDotState()
+		if err != nil {
+			return 0
+		}
+		printTmuxDot(tmuxStateForWindow(nil, dotState, windowID, now))
 		return 0
 	}
 
-	now := time.Now().UTC()
 	windowStates := summarizeTmuxWindows(status)
 	dotState := updatePersistedTmuxDotState(windowStates, activeWindowID, now)
+	printTmuxDot(tmuxStateForWindow(windowStates, dotState, windowID, now))
+	return 0
+}
 
-	// Priority: red > yellow > purple > green
-	state := windowStates[windowID]
-	if state == tmuxStateNone {
-		if dotState[windowID].StoppedUnread {
-			state = tmuxStateYellow
-		}
-	}
-
+func printTmuxDot(state tmuxWindowState) {
 	switch state {
 	case tmuxStateRed:
 		printPulsingDot("#ff0000")
@@ -105,7 +111,6 @@ func runTmuxWindowDot(args []string) int {
 	case tmuxStateGreen:
 		printPulsingDotPlain()
 	}
-	return 0
 }
 
 func updatePersistedTmuxDotState(windowStates map[string]tmuxWindowState, activeWindowID string, now time.Time) map[string]tmuxDotState {
@@ -182,6 +187,26 @@ func updateTmuxDotState(state map[string]tmuxDotState, windowStates map[string]t
 		}
 		state[id] = item
 	}
+}
+
+func tmuxStateForWindow(windowStates map[string]tmuxWindowState, dotState map[string]tmuxDotState, windowID string, now time.Time) tmuxWindowState {
+	// Priority: live red > yellow > purple > green. Yellow is local persisted
+	// unread state, and recent WasRunning is a short fallback for missed polls.
+	if state := windowStates[windowID]; state != tmuxStateNone {
+		return state
+	}
+	item := dotState[windowID]
+	if item.StoppedUnread {
+		return tmuxStateYellow
+	}
+	if item.WasRunning && tmuxDotStateFresh(item, now) {
+		return tmuxStateGreen
+	}
+	return tmuxStateNone
+}
+
+func tmuxDotStateFresh(item tmuxDotState, now time.Time) bool {
+	return !item.UpdatedAt.IsZero() && now.Sub(item.UpdatedAt) <= tmuxDotRunningFallbackTTL
 }
 
 func fetchStatusWithTimeout(cfg config.Config, timeout time.Duration) (apiStatus, error) {

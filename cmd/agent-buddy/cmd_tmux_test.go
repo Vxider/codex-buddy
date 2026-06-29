@@ -166,6 +166,52 @@ func TestUpdatePersistedTmuxDotStateStoresAndClearsUnreadState(t *testing.T) {
 	}
 }
 
+func TestTmuxStateForWindowUsesRecentRunningFallback(t *testing.T) {
+	now := time.Date(2026, 6, 24, 12, 0, 0, 0, time.UTC)
+	dotState := map[string]tmuxDotState{
+		"@7": {
+			WasRunning: true,
+			UpdatedAt:  now.Add(-2 * time.Second),
+		},
+	}
+
+	state := tmuxStateForWindow(nil, dotState, "@7", now)
+	if state != tmuxStateGreen {
+		t.Fatalf("expected recent running fallback to render green, got %v", state)
+	}
+}
+
+func TestTmuxStateForWindowExpiresRunningFallback(t *testing.T) {
+	now := time.Date(2026, 6, 24, 12, 0, 0, 0, time.UTC)
+	dotState := map[string]tmuxDotState{
+		"@7": {
+			WasRunning: true,
+			UpdatedAt:  now.Add(-(tmuxDotRunningFallbackTTL + time.Second)),
+		},
+	}
+
+	state := tmuxStateForWindow(nil, dotState, "@7", now)
+	if state != tmuxStateNone {
+		t.Fatalf("expected stale running fallback to expire, got %v", state)
+	}
+}
+
+func TestTmuxStateForWindowPrefersLiveStateOverRunningFallback(t *testing.T) {
+	now := time.Date(2026, 6, 24, 12, 0, 0, 0, time.UTC)
+	dotState := map[string]tmuxDotState{
+		"@7": {
+			WasRunning: true,
+			UpdatedAt:  now,
+		},
+	}
+	windowStates := map[string]tmuxWindowState{"@7": tmuxStatePurple}
+
+	state := tmuxStateForWindow(windowStates, dotState, "@7", now)
+	if state != tmuxStatePurple {
+		t.Fatalf("expected live state to win, got %v", state)
+	}
+}
+
 func TestSafeSQLiteLiteralIDRejectsUnsafeValues(t *testing.T) {
 	for _, value := range []string{"019ebb43-5937-7013-8da0-4365e9d75e68", "abc_DEF-123"} {
 		if !safeSQLiteLiteralID(value) {
