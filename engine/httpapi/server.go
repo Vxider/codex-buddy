@@ -652,7 +652,13 @@ func (s *Server) isSessionVisible(session model.SessionSnapshot) bool {
 		return false
 	}
 	if s.openCheck != nil && strings.TrimSpace(session.TmuxPane) != "" {
-		return s.openCheck.IsOpen(session)
+		if s.openCheck.IsOpen(session) {
+			return true
+		}
+		if removed, ok := s.store.RemoveSession(session.SessionID); ok && s.logger != nil {
+			s.logger.Printf("removed stale session=%s agent=%s missing tmux_pane=%s", removed.SessionID, removed.Agent, session.TmuxPane)
+		}
+		return false
 	}
 	return true
 }

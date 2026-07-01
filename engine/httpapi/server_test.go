@@ -21,11 +21,19 @@ type stubContinueExecutor struct {
 	text    string
 }
 
+type stubSessionOpenChecker struct {
+	open map[string]bool
+}
+
 func (s *stubContinueExecutor) Continue(session model.SessionSnapshot, text string) error {
 	s.called = true
 	s.session = session
 	s.text = text
 	return nil
+}
+
+func (s stubSessionOpenChecker) IsOpen(session model.SessionSnapshot) bool {
+	return s.open[session.TmuxPane]
 }
 
 func TestSessionContinueEndpointUsesCustomTextWhenProvided(t *testing.T) {
@@ -150,6 +158,53 @@ func TestStatusIncludesClaudeHookSessionAgent(t *testing.T) {
 	}
 	if status.Sessions[0].State != model.StateRun {
 		t.Fatalf("expected public run state, got %q", status.Sessions[0].State)
+	}
+}
+
+func TestStatusRemovesStaleTmuxSession(t *testing.T) {
+	st := store.New(30*time.Second, 0, log.New(io.Discard, "", 0))
+	now := time.Date(2026, 7, 1, 12, 0, 0, 0, time.UTC)
+	st.ApplyIngest(model.IngestRequest{
+		Source:     "claude-hook",
+		Agent:      "claude",
+		EventName:  "user-prompt-submit",
+		ReceivedAt: now,
+		Payload: model.HookPayload{
+			Agent:       "claude",
+			SessionID:   "claude-stale",
+			CWD:         "/repo",
+			Prompt:      "Run checks",
+			TmuxPane:    "%142",
+			TmuxSession: "dev",
+			TmuxWindow:  "@24",
+		},
+	})
+
+	server := NewServer(
+		config.Config{},
+		st,
+		nil,
+		nil,
+		stubSessionOpenChecker{open: map[string]bool{}},
+		log.New(io.Discard, "", 0),
+	)
+	req := httptest.NewRequest(http.MethodGet, "/v1/status", nil)
+	resp := httptest.NewRecorder()
+	server.Handler().ServeHTTP(resp, req)
+
+	if resp.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", resp.Code, resp.Body.String())
+	}
+
+	var status publicStatus
+	if err := json.NewDecoder(resp.Body).Decode(&status); err != nil {
+		t.Fatalf("decode status: %v", err)
+	}
+	if len(status.Sessions) != 0 {
+		t.Fatalf("expected stale session to be hidden, got %d", len(status.Sessions))
+	}
+	if _, ok := st.Session("claude-stale"); ok {
+		t.Fatalf("expected stale session to be removed from store")
 	}
 }
 
