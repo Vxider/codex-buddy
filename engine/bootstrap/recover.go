@@ -22,6 +22,7 @@ type Session struct {
 	TmuxPane       string
 	TmuxSession    string
 	TmuxWindow     string
+	Ready          bool
 }
 
 type pane struct {
@@ -92,6 +93,7 @@ func RecoverOpenSessions(logger *log.Logger) ([]Session, error) {
 			TmuxPane:       pane.TmuxPane,
 			TmuxSession:    pane.TmuxSession,
 			TmuxWindow:     pane.TmuxWindow,
+			Ready:          codexPaneReady(pane.TmuxPane, sessionID),
 		})
 	}
 
@@ -175,6 +177,48 @@ func listCodexPanes() ([]pane, error) {
 		return nil, err
 	}
 	return panes, nil
+}
+
+func codexPaneReady(paneID, sessionID string) bool {
+	paneID = strings.TrimSpace(paneID)
+	if paneID == "" || strings.TrimSpace(sessionID) == "" {
+		return false
+	}
+	tmuxPath, ok := tmuxExecutable()
+	if !ok {
+		return false
+	}
+	args := []string{"capture-pane", "-p", "-t", paneID, "-S", "-30"}
+	if socket := defaultTmuxSocket(); socket != "" {
+		args = append([]string{"-S", socket}, args...)
+	}
+	output, err := exec.Command(tmuxPath, args...).Output()
+	if err != nil {
+		return false
+	}
+	return paneTextIndicatesReady(string(output), sessionID)
+}
+
+func paneTextIndicatesReady(text, sessionID string) bool {
+	text = strings.TrimSpace(text)
+	sessionID = strings.TrimSpace(sessionID)
+	if text == "" || sessionID == "" {
+		return false
+	}
+	shortID := sessionID
+	if len(shortID) > 8 {
+		shortID = shortID[:8]
+	}
+	for _, line := range strings.Split(text, "\n") {
+		line = strings.TrimSpace(line)
+		if !strings.Contains(line, "Ready") {
+			continue
+		}
+		if strings.Contains(line, sessionID) || strings.Contains(line, shortID) {
+			return true
+		}
+	}
+	return false
 }
 
 func defaultTmuxSocket() string {

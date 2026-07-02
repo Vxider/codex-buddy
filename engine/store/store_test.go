@@ -45,6 +45,71 @@ func TestDiscoveryDoesNotRemoveClaudeHookSessions(t *testing.T) {
 	}
 }
 
+func TestDiscoveryDoesNotKeepRunningSessionAlive(t *testing.T) {
+	st := New(0, time.Second, log.New(io.Discard, "", 0))
+	now := time.Now().UTC().Add(-2 * time.Second)
+
+	st.ApplyIngest(model.IngestRequest{
+		EventName:  "user-prompt-submit",
+		ReceivedAt: now,
+		Payload: model.HookPayload{
+			SessionID:  "sess-running",
+			TmuxPane:   "%1",
+			TmuxWindow: "@1",
+			Prompt:     "build it",
+		},
+	})
+
+	_, snapshot := st.ApplyDiscovery([]DiscoverySession{{
+		SessionID:  "sess-running",
+		CWD:        "/tmp/work",
+		TmuxPane:   "%1",
+		TmuxWindow: "@1",
+	}}, time.Now().UTC())
+
+	if snapshot.OverallState != model.StateIdle {
+		t.Fatalf("expected stale running session to decay to idle after discovery, got %s", snapshot.OverallState)
+	}
+	session, ok := st.Session("sess-running")
+	if !ok {
+		t.Fatalf("expected session")
+	}
+	if session.State != model.StateIdle {
+		t.Fatalf("expected session state to decay to idle, got %s", session.State)
+	}
+}
+
+func TestDiscoveryReadyMarksRunningSessionIdle(t *testing.T) {
+	st := New(0, 0, log.New(io.Discard, "", 0))
+	now := time.Now().UTC()
+
+	st.ApplyIngest(model.IngestRequest{
+		EventName:  "user-prompt-submit",
+		ReceivedAt: now,
+		Payload: model.HookPayload{
+			SessionID: "sess-ready",
+			Prompt:    "build it",
+		},
+	})
+
+	_, snapshot := st.ApplyDiscovery([]DiscoverySession{{
+		SessionID: "sess-ready",
+		TmuxPane:  "%1",
+		Ready:     true,
+	}}, now.Add(time.Second))
+
+	if snapshot.OverallState != model.StateIdle {
+		t.Fatalf("expected ready discovered session to be idle, got %s", snapshot.OverallState)
+	}
+	session, ok := st.Session("sess-ready")
+	if !ok {
+		t.Fatalf("expected session")
+	}
+	if session.State != model.StateIdle {
+		t.Fatalf("expected session state to be idle, got %s", session.State)
+	}
+}
+
 func TestTranscriptCompletionClearsAttention(t *testing.T) {
 	st := New(0, 0, log.New(io.Discard, "", 0))
 	now := time.Now().UTC()

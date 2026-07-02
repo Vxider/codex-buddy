@@ -111,6 +111,7 @@ func (r *Runtime) discoverOpenSessions() {
 			TmuxPane:       session.TmuxPane,
 			TmuxSession:    session.TmuxSession,
 			TmuxWindow:     session.TmuxWindow,
+			Ready:          session.Ready,
 		})
 	}
 

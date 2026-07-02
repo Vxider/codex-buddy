@@ -21,6 +21,7 @@ type DiscoverySession struct {
 	TmuxPane       string
 	TmuxSession    string
 	TmuxWindow     string
+	Ready          bool
 }
 
 type Store struct {
@@ -337,7 +338,13 @@ func (s *Store) ApplyDiscovery(sessions []DiscoverySession, now time.Time) ([]st
 		current.TmuxPane = coalesce(discovered.TmuxPane, current.TmuxPane)
 		current.TmuxSession = coalesce(discovered.TmuxSession, current.TmuxSession)
 		current.TmuxWindow = coalesce(discovered.TmuxWindow, current.TmuxWindow)
-		current.UpdatedAt = maxTime(now, current.UpdatedAt)
+		if discovered.Ready && (current.State == model.StateRunning || current.State == model.StateRunningBash) {
+			current.PendingApprovalAt = time.Time{}
+			current.CurrentAttentionDeadline = time.Time{}
+			current.State = model.StateIdle
+			current.StateDetail = string(model.StateIdle)
+			current.UpdatedAt = now
+		}
 
 		s.reconcileNotificationLocked(current, previous, s.deriveSession(current.SessionSnapshot), now)
 	}
