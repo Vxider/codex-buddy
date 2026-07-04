@@ -112,6 +112,7 @@ func (r *Runtime) discoverOpenSessions() {
 			TmuxSession:    session.TmuxSession,
 			TmuxWindow:     session.TmuxWindow,
 			Ready:          session.Ready,
+			CodexPID:       session.CodexPID,
 		})
 	}
 

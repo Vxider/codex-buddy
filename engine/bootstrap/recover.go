@@ -23,6 +23,7 @@ type Session struct {
 	TmuxSession    string
 	TmuxWindow     string
 	Ready          bool
+	CodexPID       int
 }
 
 type pane struct {
@@ -94,6 +95,7 @@ func RecoverOpenSessions(logger *log.Logger) ([]Session, error) {
 			TmuxSession:    pane.TmuxSession,
 			TmuxWindow:     pane.TmuxWindow,
 			Ready:          codexPaneReady(pane.TmuxPane, sessionID),
+			CodexPID:       codexProc.PID,
 		})
 	}
 
@@ -131,6 +133,7 @@ func recoverProcessSessions(processes map[int]process, logger *log.Logger) []Ses
 		sessions = append(sessions, Session{
 			SessionID:      sessionID,
 			TranscriptPath: transcriptPath,
+			CodexPID:       proc.PID,
 		})
 	}
 	sort.Slice(sessions, func(i, j int) bool {

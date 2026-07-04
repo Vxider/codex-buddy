@@ -110,6 +110,34 @@ func TestDiscoveryReadyMarksRunningSessionIdle(t *testing.T) {
 	}
 }
 
+func TestDiscoveryPIDAllowsReaperToRemoveExitedSession(t *testing.T) {
+	st := New(0, 0, log.New(io.Discard, "", 0))
+	now := time.Now().UTC()
+
+	_, snapshot := st.ApplyDiscovery([]DiscoverySession{{
+		SessionID: "sess-process-only",
+		CodexPID:  4242,
+	}}, now)
+	if snapshot.SessionsCount != 1 {
+		t.Fatalf("expected discovered session, got %d", snapshot.SessionsCount)
+	}
+
+	original := processAliveFunc
+	processAliveFunc = func(pid int) bool {
+		if pid != 4242 {
+			t.Fatalf("unexpected pid checked: %d", pid)
+		}
+		return false
+	}
+	defer func() { processAliveFunc = original }()
+
+	st.reapDeadSessions()
+
+	if _, ok := st.Session("sess-process-only"); ok {
+		t.Fatalf("expected exited process-only session to be reaped")
+	}
+}
+
 func TestTranscriptCompletionClearsAttention(t *testing.T) {
 	st := New(0, 0, log.New(io.Discard, "", 0))
 	now := time.Now().UTC()

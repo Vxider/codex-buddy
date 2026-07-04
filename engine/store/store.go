@@ -22,6 +22,7 @@ type DiscoverySession struct {
 	TmuxSession    string
 	TmuxWindow     string
 	Ready          bool
+	CodexPID       int
 }
 
 type Store struct {
@@ -338,6 +339,9 @@ func (s *Store) ApplyDiscovery(sessions []DiscoverySession, now time.Time) ([]st
 		current.TmuxPane = coalesce(discovered.TmuxPane, current.TmuxPane)
 		current.TmuxSession = coalesce(discovered.TmuxSession, current.TmuxSession)
 		current.TmuxWindow = coalesce(discovered.TmuxWindow, current.TmuxWindow)
+		if discovered.CodexPID > 0 {
+			current.codexPID = discovered.CodexPID
+		}
 		if discovered.Ready && (current.State == model.StateRunning || current.State == model.StateRunningBash) {
 			current.PendingApprovalAt = time.Time{}
 			current.CurrentAttentionDeadline = time.Time{}
