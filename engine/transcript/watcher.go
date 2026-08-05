@@ -225,6 +225,8 @@ type responseItemPayload struct {
 	Name    string            `json:"name"`
 	Args    json.RawMessage   `json:"arguments"`
 	Content []contentFragment `json:"content"`
+	Message string            `json:"message"`
+	Error   json.RawMessage   `json:"error"`
 }
 
 type contentFragment struct {
@@ -233,14 +235,17 @@ type contentFragment struct {
 }
 
 type eventPayload struct {
-	Type             string   `json:"type"`
-	Message          string   `json:"message"`
-	TurnID           string   `json:"turn_id"`
-	CWD              string   `json:"cwd"`
-	Model            string   `json:"model"`
-	Command          []string `json:"command"`
-	AggregatedOutput string   `json:"aggregated_output"`
-	Status           string   `json:"status"`
+	Type             string          `json:"type"`
+	Message          string          `json:"message"`
+	TurnID           string          `json:"turn_id"`
+	CWD              string          `json:"cwd"`
+	Model            string          `json:"model"`
+	Command          []string        `json:"command"`
+	AggregatedOutput string          `json:"aggregated_output"`
+	Status           string          `json:"status"`
+	ErrorMessage     string          `json:"error_message"`
+	Error            json.RawMessage `json:"error"`
+	Reason           string          `json:"reason"`
 }
 
 func parseLine(sessionID string, line []byte) (model.TranscriptUpdate, bool) {
@@ -292,6 +297,9 @@ func parseLine(sessionID string, line []byte) (model.TranscriptUpdate, bool) {
 			}
 			updateGoalState(&update, payload.Name, payload.Args, parsedTime)
 		}
+		if payload.Type == "error" {
+			update.Error = firstNonEmptyText(payload.Message, rawErrorText(payload.Error), "Codex error")
+		}
 		return update, hasUsefulTranscriptUpdate(update)
 	case "event_msg":
 		var payload eventPayload
@@ -311,11 +319,40 @@ func parseLine(sessionID string, line []byte) (model.TranscriptUpdate, bool) {
 			if strings.EqualFold(payload.Status, "failed") && strings.TrimSpace(payload.AggregatedOutput) != "" {
 				update.Error = payload.AggregatedOutput
 			}
+		case "error", "turn_failed", "task_failed", "turn_aborted":
+			if !intentionalAbort(payload.Reason) {
+				update.Error = firstNonEmptyText(payload.Message, payload.ErrorMessage, rawErrorText(payload.Error), payload.AggregatedOutput, strings.ReplaceAll(payload.Type, "_", " "))
+			}
 		}
 		return update, hasUsefulTranscriptUpdate(update)
 	default:
 		return model.TranscriptUpdate{}, false
 	}
+}
+
+func rawErrorText(raw json.RawMessage) string {
+	if len(bytes.TrimSpace(raw)) == 0 {
+		return ""
+	}
+	var text string
+	if json.Unmarshal(raw, &text) == nil {
+		return strings.TrimSpace(text)
+	}
+	var values map[string]any
+	if json.Unmarshal(raw, &values) != nil {
+		return ""
+	}
+	for _, key := range []string{"message", "error", "detail", "reason"} {
+		if value, ok := values[key].(string); ok && strings.TrimSpace(value) != "" {
+			return strings.TrimSpace(value)
+		}
+	}
+	return ""
+}
+
+func intentionalAbort(reason string) bool {
+	reason = strings.ToLower(strings.TrimSpace(reason))
+	return reason == "user" || reason == "user_cancelled" || reason == "user-cancelled" || reason == "cancelled" || reason == "canceled"
 }
 
 func mergeUpdate(dst *model.TranscriptUpdate, src model.TranscriptUpdate) {

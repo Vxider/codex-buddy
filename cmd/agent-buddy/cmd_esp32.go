@@ -12,6 +12,7 @@ import (
 
 	"github.com/vxider/agent-buddy/internal/config"
 	"github.com/vxider/agent-buddy/internal/esp32sidecar"
+	"github.com/vxider/agent-buddy/internal/model"
 )
 
 func runESP32(args []string) int {
@@ -70,6 +71,11 @@ func runESP32(args []string) int {
 	if once {
 		status, err := client.LoadStatus(ctx)
 		if err != nil {
+			_ = publisher.Publish(ctx, esp32sidecar.Frame{
+				State:       model.StateError,
+				StateDetail: "network_error",
+				LED:         "error",
+			})
 			fmt.Printf("status request failed: %v\n", err)
 			return 1
 		}

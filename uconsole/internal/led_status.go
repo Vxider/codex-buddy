@@ -21,7 +21,7 @@ const (
 	codexLEDOff       codexLEDState = "off"
 	codexLEDWorking   codexLEDState = "working"
 	codexLEDAttention codexLEDState = "attention"
-	codexLEDApproval  codexLEDState = "approval"
+	codexLEDError     codexLEDState = "error"
 	codexLEDGoal      codexLEDState = "goal"
 )
 
@@ -74,30 +74,62 @@ func writeCodexLEDStatus(state codexLEDState, connected bool) error {
 
 func codexLEDStateFromStatus(status StatusResponse, connected bool) codexLEDState {
 	if !connected {
-		return codexLEDOff
+		return codexLEDError
+	}
+	overallState := normalizeCompatState(status.OverallState)
+	if overallState == model.StateError {
+		return codexLEDError
 	}
 	state := codexLEDOff
 	if len(status.Sessions) > 0 {
 		for _, session := range status.Sessions {
 			state = strongerCodexLEDState(state, codexLEDStateFromSession(session))
 		}
+		if model.IsCodexInterruptionText(status.OverallStateDetail) {
+			return codexLEDError
+		}
+		if state == codexLEDAttention {
+			return state
+		}
 		return state
 	}
+	if model.IsCodexInterruptionText(status.OverallStateDetail) {
+		return codexLEDError
+	}
 	return codexLEDStateFromOverall(status.OverallState)
+}
+
+func codexLEDStateFromSnapshots(snapshots []serverSnapshot) codexLEDState {
+	if len(snapshots) == 0 {
+		return codexLEDOff
+	}
+	for _, snapshot := range snapshots {
+		if snapshot.Err != nil {
+			return codexLEDError
+		}
+	}
+	status, _, connected, _ := aggregateSnapshots(snapshots)
+	return codexLEDStateFromStatus(status, connected)
 }
 
 func codexLEDStateFromSession(session SessionResponse) codexLEDState {
 	state := normalizeSessionState(session.State)
 	detail := strings.ToLower(strings.TrimSpace(session.StateDetail))
 	reason := strings.ToLower(strings.TrimSpace(session.OpenReason))
-	if sessionHasRecentGoal(session) {
-		return codexLEDGoal
+	if state == model.StateError {
+		return codexLEDError
 	}
 	if session.NeedsApproval || reason == "approval" {
-		return codexLEDApproval
+		return codexLEDAttention
 	}
 	if strings.Contains(detail, "permissionrequest") || strings.Contains(detail, "permission request") {
-		return codexLEDApproval
+		return codexLEDAttention
+	}
+	if model.IsCodexInterruptionText(detail, session.OpenSummary, session.Summary) {
+		return codexLEDError
+	}
+	if sessionHasRecentGoal(session) {
+		return codexLEDGoal
 	}
 	if reason == "followup" && session.NeedsOpen && !session.NeedsApproval {
 		return codexLEDAttention
@@ -125,6 +157,8 @@ func codexLEDStateFromOverall(state model.State) codexLEDState {
 	switch normalizeCompatState(state) {
 	case model.StateRun, model.StateRunningBash:
 		return codexLEDWorking
+	case model.StateError:
+		return codexLEDError
 	case model.StateAttention:
 		return codexLEDAttention
 	default:
@@ -141,10 +175,10 @@ func strongerCodexLEDState(current, candidate codexLEDState) codexLEDState {
 
 func codexLEDStateRank(state codexLEDState) int {
 	switch state {
+	case codexLEDError:
+		return 50
 	case codexLEDGoal:
 		return 40
-	case codexLEDApproval:
-		return 30
 	case codexLEDAttention:
 		return 20
 	case codexLEDWorking:
@@ -156,7 +190,7 @@ func codexLEDStateRank(state codexLEDState) int {
 
 func validateCodexLEDState(state codexLEDState) error {
 	switch state {
-	case codexLEDOff, codexLEDWorking, codexLEDAttention, codexLEDApproval, codexLEDGoal:
+	case codexLEDOff, codexLEDWorking, codexLEDAttention, codexLEDError, codexLEDGoal:
 		return nil
 	default:
 		return fmt.Errorf("invalid codex LED state %q", state)

@@ -1,6 +1,7 @@
 package store
 
 import (
+	"fmt"
 	"io"
 	"log"
 	"strings"
@@ -45,6 +46,44 @@ func TestApplyIngestTransitions(t *testing.T) {
 	}
 	if session.State != model.StateAttention {
 		t.Fatalf("expected attention to remain active, got %s", session.State)
+	}
+}
+
+func TestCodexInterruptionHookPromotesSessionToError(t *testing.T) {
+	tests := []string{
+		"HTTP 401 Unauthorized",
+		"HTTP 402 Payment Required",
+		"usage quota exhausted",
+		"network connection timed out",
+	}
+
+	for index, message := range tests {
+		st := New(0, 0, log.New(io.Discard, "", 0))
+		now := time.Now().UTC()
+		sessionID := fmt.Sprintf("hook-interruption-%d", index)
+
+		snapshot := st.ApplyIngest(model.IngestRequest{
+			EventName:  "user-prompt-submit",
+			ReceivedAt: now,
+			Payload: model.HookPayload{
+				SessionID: sessionID,
+				Error:     message,
+			},
+		})
+		if snapshot.OverallState != model.StateError {
+			t.Fatalf("expected hook error %q to set overall error, got %s", message, snapshot.OverallState)
+		}
+
+		session, ok := st.Session(sessionID)
+		if !ok {
+			t.Fatalf("expected session %q", sessionID)
+		}
+		if session.State != model.StateError {
+			t.Fatalf("expected hook error %q to set session error, got %s", message, session.State)
+		}
+		if session.LastError != message {
+			t.Fatalf("expected hook error metadata %q, got %q", message, session.LastError)
+		}
 	}
 }
 
@@ -665,6 +704,45 @@ func TestTranscriptErrorDoesNotPromoteRunningSessionToError(t *testing.T) {
 	}
 	if session.LastError != "tool failed internally" {
 		t.Fatalf("expected last error metadata to be retained, got %q", session.LastError)
+	}
+}
+
+func TestCodexInterruptionTranscriptPromotesRunningSessionToError(t *testing.T) {
+	tests := []string{
+		"HTTP 401 Unauthorized",
+		"HTTP 402 Payment Required",
+		"usage quota exhausted",
+		"network connection timed out",
+	}
+
+	for index, message := range tests {
+		st := New(0, 0, log.New(io.Discard, "", 0))
+		now := time.Now().UTC()
+		sessionID := fmt.Sprintf("sess-interruption-%d", index)
+		st.ApplyIngest(model.IngestRequest{
+			EventName:  "user-prompt-submit",
+			ReceivedAt: now,
+			Payload: model.HookPayload{
+				SessionID: sessionID,
+			},
+		})
+
+		st.ApplyTranscriptUpdate(model.TranscriptUpdate{
+			SessionID: sessionID,
+			Error:     message,
+			UpdatedAt: now.Add(time.Second),
+		})
+
+		session, ok := st.Session(sessionID)
+		if !ok {
+			t.Fatalf("expected session %q", sessionID)
+		}
+		if session.State != model.StateError {
+			t.Fatalf("expected %q to promote session to error, got %s", message, session.State)
+		}
+		if session.StateDetail != string(model.StateError) {
+			t.Fatalf("expected error state detail, got %q", session.StateDetail)
+		}
 	}
 }
 

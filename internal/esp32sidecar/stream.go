@@ -8,6 +8,8 @@ import (
 	"net/http"
 	"strings"
 	"time"
+
+	"github.com/vxider/agent-buddy/internal/model"
 )
 
 type Client struct {
@@ -100,6 +102,12 @@ func RunBridge(ctx context.Context, client *Client, publisher Publisher) error {
 		if err := publisher.Publish(ctx, FrameFromStatus(status)); err != nil {
 			return err
 		}
+	} else {
+		_ = publisher.Publish(ctx, Frame{
+			State:       model.StateError,
+			StateDetail: "network_error",
+			LED:         "error",
+		})
 	}
 
 	streamErr := client.StreamStatus(ctx, func(status Status) {
@@ -108,6 +116,10 @@ func RunBridge(ctx context.Context, client *Client, publisher Publisher) error {
 	if ctx.Err() != nil {
 		return nil
 	}
-	_ = publisher.Publish(ctx, Frame{State: "offline", LED: "off"})
+	_ = publisher.Publish(ctx, Frame{
+		State:       model.StateError,
+		StateDetail: "network_error",
+		LED:         "error",
+	})
 	return streamErr
 }

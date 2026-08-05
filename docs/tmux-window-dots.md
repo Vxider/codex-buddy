@@ -6,8 +6,8 @@
 
 | Color   | Hex       | Meaning                          | Trigger Condition                              |
 |---------|-----------|----------------------------------|------------------------------------------------|
-| Red     | `#ff0000` | Needs approval / Error           | Session state is `error` or `attention`        |
-| Yellow  | `#ffff00` | Stopped (unread)                 | Session was running, now idle; user hasn't focused the window |
+| Red     | `#ff0000` | Codex abnormal interruption      | Session state is `error`                         |
+| Yellow  | `#ffff00` | Attention / stopped (unread)     | Session state is `attention`, or session was running and is now idle; user hasn't focused the window |
 | Purple  | `#af00ff` | Goal running                     | Session is running with an active goal         |
 | Green   | `#00ff00` | Running normal task              | Session is running without an active goal      |
 
@@ -21,8 +21,8 @@ red > yellow > purple > green
 
 ## State Transitions
 
-- **Red**: Triggered by `error` or `attention` state. Does not trigger yellow when cleared.
-- **Yellow**: Triggered when a running session transitions to `idle`. Cleared when:
+- **Red**: Triggered by `error` state, including Codex authentication failures, HTTP errors (401/402/403/429/500/502/503/504), exhausted quota or credits, rate limits, network interruptions, connection failures, timeouts, and service failures. It does not trigger yellow when cleared.
+- **Yellow**: Triggered by `attention` state or when a running session transitions to `idle`. Cleared when:
   - User focuses the window
   - Session starts running again
 - **Purple**: Session is running and has an active goal (from `/v1/status` or `goals_1.sqlite`).

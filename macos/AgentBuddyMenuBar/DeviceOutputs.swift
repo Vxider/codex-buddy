@@ -158,6 +158,8 @@ struct StatusFrame: Equatable {
         case .attention:
             return "yellow"
         case .approval:
+            return "yellow"
+        case .error:
             return "red"
         case .goal:
             return "purple"

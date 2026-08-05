@@ -51,11 +51,25 @@ func normalizeState(state model.State) model.State {
 }
 
 func SignalLED(status Status) string {
+	overallState := normalizeState(status.OverallState)
+	if overallState == model.StateError {
+		return "red"
+	}
+
 	signal := "off"
 	for _, session := range status.Sessions {
 		signal = strongerSignal(signal, sessionSignal(session))
 	}
-	if signal == "off" && normalizeState(status.OverallState) == model.StateIdle {
+	if model.IsCodexInterruptionText(status.OverallStateDetail) {
+		return "red"
+	}
+	if signal == "attention" {
+		return "yellow"
+	}
+	if signal == "off" && overallState == model.StateOpen {
+		return "yellow"
+	}
+	if signal == "off" && overallState == model.StateIdle {
 		return "green"
 	}
 	return signalColor(signal)
@@ -66,14 +80,20 @@ func sessionSignal(session Session) string {
 	detail := strings.ToLower(strings.TrimSpace(session.StateDetail))
 	reason := strings.ToLower(strings.TrimSpace(session.OpenReason))
 	goalState := strings.ToLower(strings.TrimSpace(string(session.GoalState)))
-	if goalState == "achieved" || goalState == "complete" || goalState == "completed" || goalState == "done" || goalState == "success" || goalState == "succeeded" {
-		return "goal"
+	if state == string(model.StateError) {
+		return "error"
 	}
 	if session.NeedsApproval || reason == "approval" {
-		return "approval"
+		return "attention"
 	}
 	if strings.Contains(detail, "permissionrequest") || strings.Contains(detail, "permission request") {
-		return "approval"
+		return "attention"
+	}
+	if model.IsCodexInterruptionText(detail, session.OpenSummary, session.Summary) {
+		return "error"
+	}
+	if goalState == "achieved" || goalState == "complete" || goalState == "completed" || goalState == "done" || goalState == "success" || goalState == "succeeded" {
+		return "goal"
 	}
 	if reason == "followup" && session.NeedsOpen && !session.NeedsApproval {
 		return "attention"
@@ -88,7 +108,7 @@ func sessionSignal(session Session) string {
 }
 
 func strongerSignal(current, candidate string) string {
-	priority := map[string]int{"off": 0, "working": 10, "attention": 20, "approval": 30, "goal": 40}
+	priority := map[string]int{"off": 0, "working": 10, "attention": 20, "error": 50, "goal": 40}
 	if priority[candidate] > priority[current] {
 		return candidate
 	}
@@ -97,9 +117,9 @@ func strongerSignal(current, candidate string) string {
 
 func signalColor(signal string) string {
 	switch signal {
-	case "approval":
+	case "error":
 		return "red"
-	case "attention":
+	case "attention", "approval":
 		return "yellow"
 	case "working":
 		return "green"
@@ -112,9 +132,9 @@ func signalColor(signal string) string {
 
 func normalizeLED(led string) string {
 	switch strings.ToLower(strings.TrimSpace(led)) {
-	case "red", "approval", "error":
+	case "red", "error":
 		return "red"
-	case "yellow", "attention", "open":
+	case "yellow", "attention", "open", "approval":
 		return "yellow"
 	case "green", "working", "idle":
 		return "green"

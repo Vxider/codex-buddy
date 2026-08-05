@@ -1,0 +1,9 @@
+{
+  "name": "entry",
+  "version": "0.1.0",
+  "description": "Agent Buddy HarmonyOS NEXT entry module",
+  "main": "./ets/entryability/EntryAbility.ets",
+  "author": "vxider",
+  "license": "MIT",
+  "dependencies": {}
+}

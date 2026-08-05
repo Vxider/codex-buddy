@@ -24,7 +24,7 @@ const (
 	tmuxStateGreen                  // running normal task
 	tmuxStatePurple                 // running goal
 	tmuxStateYellow                 // stopped/idle
-	tmuxStateRed                    // error/attention
+	tmuxStateRed                    // Codex abnormal interruption
 )
 
 func (s tmuxWindowState) String() string {
@@ -86,11 +86,8 @@ func runTmuxWindowDot(args []string) int {
 	now := time.Now().UTC()
 	status, err := fetchStatusWithTimeout(cfg, time.Duration(timeoutMS)*time.Millisecond)
 	if err != nil {
-		dotState, err := loadTmuxDotState()
-		if err != nil {
-			return 0
-		}
-		printTmuxDot(tmuxStateForWindow(nil, dotState, windowID, now))
+		// A status fetch failure is itself a red Codex interruption signal.
+		printTmuxDot(tmuxStateRed)
 		return 0
 	}
 
@@ -157,7 +154,7 @@ func updateTmuxDotState(state map[string]tmuxDotState, windowStates map[string]t
 		}
 		active := windowActive[id]
 		// Only mark stopped_unread when transitioning from running to idle
-		// Error/attention (red) does not trigger yellow
+		// Error (red) does not trigger yellow; attention is already yellow.
 		if item.WasRunning && !active && id != activeWindowID && windowStates[id] != tmuxStateRed {
 			item.StoppedUnread = true
 			item.UpdatedAt = now
@@ -240,8 +237,10 @@ func summarizeTmuxWindows(status apiStatus) map[string]tmuxWindowState {
 
 		var s tmuxWindowState
 		switch session.State {
-		case model.StateError, model.StateAttention:
+		case model.StateError:
 			s = tmuxStateRed
+		case model.StateAttention:
+			s = tmuxStateYellow
 		case model.StateRun, model.StateRunning, model.StateRunningBash:
 			if session.GoalState == model.GoalStateInProgress || codexGoalActive(session.SessionID) {
 				s = tmuxStatePurple

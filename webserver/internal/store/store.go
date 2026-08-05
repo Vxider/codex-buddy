@@ -163,6 +163,13 @@ func (s *Store) ApplyIngest(req model.IngestRequest) model.StatusSnapshot {
 	default:
 		s.logger.Printf("ignoring unknown event=%q session=%q", event, sessionID)
 	}
+	if model.IsCodexInterruptionText(req.Payload.Error) {
+		session.LastError = preview(req.Payload.Error)
+		session.PendingApprovalAt = time.Time{}
+		session.CurrentAttentionDeadline = time.Time{}
+		session.State = model.StateError
+		session.StateDetail = string(model.StateError)
+	}
 
 	s.appendRecentEventLocked(model.RecentEvent{
 		Time:      req.ReceivedAt,
@@ -219,6 +226,12 @@ func (s *Store) ApplyTranscriptUpdate(update model.TranscriptUpdate) model.Statu
 	}
 	if update.Error != "" {
 		session.LastError = preview(update.Error)
+		if model.IsCodexInterruptionText(update.Error) {
+			session.State = model.StateError
+			session.StateDetail = string(model.StateError)
+			session.PendingApprovalAt = time.Time{}
+			session.CurrentAttentionDeadline = time.Time{}
+		}
 	}
 	if update.GoalUpdated {
 		session.GoalState = update.GoalState

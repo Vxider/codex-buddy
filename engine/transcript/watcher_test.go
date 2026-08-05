@@ -84,6 +84,25 @@ func TestParseLineGoalToolCallAcceptsObjectArguments(t *testing.T) {
 	}
 }
 
+func TestParseLineCodexErrorEvent(t *testing.T) {
+	line := []byte(`{"timestamp":"2026-04-02T13:24:02.973Z","type":"event_msg","payload":{"type":"error","message":"HTTP 401 Unauthorized"}}`)
+	update, ok := parseLine("sess-1", line)
+	if !ok {
+		t.Fatalf("expected parse success")
+	}
+	if update.Error != "HTTP 401 Unauthorized" {
+		t.Fatalf("unexpected Codex error: %q", update.Error)
+	}
+}
+
+func TestParseLineUserAbortDoesNotCreateError(t *testing.T) {
+	line := []byte(`{"timestamp":"2026-04-02T13:24:02.973Z","type":"event_msg","payload":{"type":"turn_aborted","reason":"user"}}`)
+	update, ok := parseLine("sess-1", line)
+	if ok || update.Error != "" {
+		t.Fatalf("expected user abort to be ignored, got ok=%v update=%#v", ok, update)
+	}
+}
+
 func TestRecoverSessionCreateGoalAfterCompleteReturnsInProgress(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "rollout-2026-06-08T13-00-00-sess-1.jsonl")

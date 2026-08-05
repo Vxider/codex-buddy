@@ -1646,6 +1646,11 @@ func (a *App) ledServerStreamLoop(ctx context.Context, server BuddyServer, clien
 		if err != nil && a.logger != nil {
 			a.logger.Printf("uconsole: status stream disconnected for %s: %v", server.DisplayName(), err)
 		}
+		failure := err
+		if failure == nil {
+			failure = errors.New("status stream disconnected")
+		}
+		a.updateLEDServerFailure(server, failure)
 		select {
 		case <-ctx.Done():
 			return
@@ -1669,6 +1674,21 @@ func (a *App) updateLEDServerSnapshot(server BuddyServer, status StatusResponse)
 	a.writeLEDStatusFromSnapshots(snapshots)
 }
 
+func (a *App) updateLEDServerFailure(server BuddyServer, err error) {
+	snapshot := serverSnapshot{
+		Server:    server,
+		Status:    offlineStatus(),
+		Connected: false,
+		Err:       err,
+		FetchedAt: time.Now(),
+	}
+	a.ledMu.Lock()
+	a.ledSnapshots[server.ID] = snapshot
+	snapshots := a.currentLEDSnapshotsLocked()
+	a.ledMu.Unlock()
+	a.writeLEDStatusFromSnapshots(snapshots)
+}
+
 func (a *App) currentLEDSnapshotsLocked() []serverSnapshot {
 	snapshots := make([]serverSnapshot, 0, len(a.ledSnapshots))
 	for _, snapshot := range a.ledSnapshots {
@@ -1678,8 +1698,9 @@ func (a *App) currentLEDSnapshotsLocked() []serverSnapshot {
 }
 
 func (a *App) writeLEDStatusFromSnapshots(snapshots []serverSnapshot) {
-	status, _, connected, _ := aggregateSnapshots(snapshots)
-	a.writeLEDStatus(codexLEDStateFromStatus(status, connected), connected)
+	state := codexLEDStateFromSnapshots(snapshots)
+	_, _, connected, _ := aggregateSnapshots(snapshots)
+	a.writeLEDStatus(state, connected)
 }
 
 func (a *App) writeLEDStatus(state codexLEDState, connected bool) {

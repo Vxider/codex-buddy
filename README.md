@@ -12,12 +12,13 @@
 - prefer passive state bridging over deep orchestration or hidden automation
 - keep full debugging and detailed interaction in the main terminal, not in the companion surface
 
-The repository currently contains three tracks:
+The repository currently contains four tracks:
 
 - Server: passively monitors locally running Codex CLI sessions and Claude hook events without creating threads or sending turns
 - uConsole client: native GUI for aggregate state, attention/error reminders, and one-shot `continue + Enter` actions during `attention`
 - macOS menu bar client: native AppKit status item with SSE-backed LED state and on-demand session menu
 - iPhone / Apple Watch companion: SwiftUI sources and an XcodeGen project spec for a mobile client
+- HarmonyOS NEXT companion: ArkTS/ArkUI client with Live View Kit red/yellow/purple/green state lights
 
 ## Capabilities
 
@@ -200,6 +201,7 @@ The `uconsole` config block currently includes:
 ## Documentation
 
 - [ios/README.md](ios/README.md)
+- [harmonyos/README.md](harmonyos/README.md)
 - [webserver/docs/architecture.md](webserver/docs/architecture.md)
 - [webserver/docs/software-plan.md](webserver/docs/software-plan.md)
 - [uconsole/docs/hardware.md](uconsole/docs/hardware.md)

@@ -435,7 +435,7 @@ final class SettingsWindowController: NSWindowController, NSTableViewDataSource,
                         do {
                             return (server.id, LEDState.aggregate(snapshot: try await api.loadStatus(for: server)))
                         } catch {
-                            return (server.id, .off)
+                            return (server.id, .error)
                         }
                     }
                 }

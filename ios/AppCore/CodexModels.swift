@@ -37,7 +37,7 @@ enum CodexState: String, Codable, CaseIterable, Hashable {
         case .run, .running, .runningBash:
             return .run
         default:
-            return .open
+            return self
         }
     }
 

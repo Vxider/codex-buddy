@@ -110,15 +110,15 @@ func TestSummarizeTmuxWindowsPriority(t *testing.T) {
 	}
 }
 
-func TestSummarizeTmuxWindowsAttentionIsRed(t *testing.T) {
+func TestSummarizeTmuxWindowsAttentionIsYellow(t *testing.T) {
 	status := apiStatus{
 		Sessions: []apiSession{
 			{SessionID: "sess-att", State: model.StateAttention, TmuxWindow: "@30"},
 		},
 	}
 	result := summarizeTmuxWindows(status)
-	if result["@30"] != tmuxStateRed {
-		t.Fatalf("expected red for attention @30, got %v", result["@30"])
+	if result["@30"] != tmuxStateYellow {
+		t.Fatalf("expected yellow for attention @30, got %v", result["@30"])
 	}
 }
 

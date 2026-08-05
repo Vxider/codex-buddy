@@ -406,9 +406,9 @@ void applyStateText(String state) {
 void applyLEDText(String led) {
   led.trim();
   led.toLowerCase();
-  if (led == "red" || led == "approval" || led == "error") {
+  if (led == "red" || led == "error") {
     currentSignal = SignalColor::Red;
-  } else if (led == "yellow" || led == "attention" || led == "open") {
+  } else if (led == "yellow" || led == "attention" || led == "open" || led == "approval") {
     currentSignal = SignalColor::Yellow;
   } else if (led == "green" || led == "working" || led == "idle") {
     currentSignal = SignalColor::Green;
@@ -689,9 +689,10 @@ void loop() {
   }
   runDemoBeforeFirstFrame(currentNow);
   if (lastFrameAt != 0 && currentNow - lastFrameAt > kOfflineAfterMs) {
-    setState(CodexState::Offline);
-    currentSignal = SignalColor::Off;
-    blackoutLeds();
+    // A previously connected bridge that stops sending frames is a transport
+    // interruption, so keep the red error signal visible until recovery.
+    setState(CodexState::Error);
+    currentSignal = SignalColor::Red;
   }
   if (sessionDoneAt != 0 && static_cast<int32_t>(currentNow - sessionDoneAt) >= static_cast<int32_t>(kSessionDoneDurationMs)) {
     sessionDoneAt = 0;

@@ -45,6 +45,44 @@ func TestDiscoveryDoesNotRemoveClaudeHookSessions(t *testing.T) {
 	}
 }
 
+func TestCodexInterruptionHookPromotesSessionToError(t *testing.T) {
+	tests := []string{
+		"HTTP 401 Unauthorized",
+		"HTTP 402 Payment Required",
+		"usage quota exhausted",
+		"network connection timed out",
+	}
+
+	for index, message := range tests {
+		st := New(0, 0, log.New(io.Discard, "", 0))
+		now := time.Now().UTC()
+		sessionID := "hook-interruption-" + string(rune('a'+index))
+
+		snapshot := st.ApplyIngest(model.IngestRequest{
+			EventName:  "user-prompt-submit",
+			ReceivedAt: now,
+			Payload: model.HookPayload{
+				SessionID: sessionID,
+				Error:     message,
+			},
+		})
+		if snapshot.OverallState != model.StateError {
+			t.Fatalf("expected hook error %q to set overall error, got %s", message, snapshot.OverallState)
+		}
+
+		session, ok := st.Session(sessionID)
+		if !ok {
+			t.Fatalf("expected session %q", sessionID)
+		}
+		if session.State != model.StateError {
+			t.Fatalf("expected hook error %q to set session error, got %s", message, session.State)
+		}
+		if session.LastError != message {
+			t.Fatalf("expected hook error metadata %q, got %q", message, session.LastError)
+		}
+	}
+}
+
 func TestDiscoveryDoesNotKeepRunningSessionAlive(t *testing.T) {
 	st := New(0, time.Second, log.New(io.Discard, "", 0))
 	now := time.Now().UTC().Add(-2 * time.Second)

@@ -58,15 +58,15 @@ CB1 state=run led=green detail=running sessions=1 summary=Refactor
 
 The firmware primarily follows the `led` field:
 
-- `red`: first group, approval/error
+- `red`: first group, Codex abnormal interruption
 - `yellow`: second group, attention/open
 - `green`: third group, idle/working
 - `purple`: all groups with a pipeline effect, goal/purple signal
 - `off`: fallback to state-derived display
 
 All flashing effects include a light breathing modulation. If no frame is
-received for 15 seconds after the first frame, the firmware shows the offline
-state.
+received after a connection has been established, the firmware shows the red
+Codex abnormal interruption signal until the bridge recovers.
 
 ## Serial Test Commands
 
@@ -91,8 +91,8 @@ Open the serial monitor and send one command per line:
 - group 1: red
 - group 2: yellow
 - group 3: green
-- `approval` / permission or error: red group breathes
-- `attention` / open follow-up: yellow group breathes
+- `error` / Codex abnormal interruption (including authentication failures, HTTP 401/402/403/429/500/502/503/504, exhausted quota or credits, rate limits, network interruptions, connection failures, timeouts, and service failures): red group breathes
+- `approval`, `attention`, and open follow-up: yellow group breathes
 - `working` and idle-ready fallback: green group breathes
 - `goal` / purple signal: all 21 LEDs use a purple breathing pipeline
 

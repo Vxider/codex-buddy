@@ -1,0 +1,16 @@
+{
+  "string": [
+    {
+      "name": "app_name",
+      "value": "Agent Buddy"
+    },
+    {
+      "name": "module_desc",
+      "value": "Agent Buddy Codex status client"
+    },
+    {
+      "name": "ability_desc",
+      "value": "Agent Buddy status ability"
+    }
+  ]
+}

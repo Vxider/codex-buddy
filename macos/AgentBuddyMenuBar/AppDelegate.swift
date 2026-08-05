@@ -54,9 +54,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             DispatchQueue.main.async {
                 guard let self else { return }
                 self.lastError = error?.localizedDescription
-                self.ledState = .off
+                self.ledState = .error
                 self.updateStatusIcon()
-                self.deviceOutputs.publish(snapshot: .offline, ledState: .off)
+                self.deviceOutputs.publish(snapshot: .offline, ledState: .error)
             }
         }
         stream.start()
@@ -81,7 +81,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             } catch {
                 await MainActor.run {
                     self.lastError = error.localizedDescription
-                    self.deviceOutputs.publish(snapshot: .offline, ledState: .off)
+                    self.ledState = .error
+                    self.updateStatusIcon()
+                    self.deviceOutputs.publish(snapshot: .offline, ledState: .error)
                 }
             }
         }
@@ -120,7 +122,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 self.serverSnapshots = nextSnapshots
                 self.serverErrors = nextErrors
                 self.lastError = nextErrors.isEmpty ? nil : "\(nextErrors.count) server\(nextErrors.count == 1 ? "" : "s") offline"
-                self.ledState = self.aggregateLEDState(from: nextSnapshots.values)
+                self.ledState = nextErrors.isEmpty ? self.aggregateLEDState(from: nextSnapshots.values) : .error
                 self.updateStatusIcon()
                 if let menu {
                     self.rebuildMenu(menu, loading: false)
@@ -277,10 +279,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     private func rank(_ state: LEDState) -> Int {
         switch state {
+        case .error:
+            return 50
         case .goal:
             return 40
         case .approval:
-            return 30
+            return 20
         case .attention:
             return 20
         case .working:
@@ -303,21 +307,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     private func ledState(for session: CodexSessionSummary) -> LEDState {
-        if session.goalState == "achieved" || session.goalState == "complete" || session.goalState == "completed" {
-            return .goal
-        }
-        let detail = (session.stateDetail ?? "").lowercased()
-        let reason = (session.openReason ?? "").lowercased()
-        if session.needsApproval || reason == "approval" || detail.contains("permissionrequest") || detail.contains("permission request") {
-            return .approval
-        }
-        if session.needsOpen || session.state.normalized == .open || session.state.normalized == .error {
-            return .attention
-        }
-        if session.state.normalized == .run || session.state.normalized == .runningBash {
-            return .working
-        }
-        return .off
+        LEDState.forSession(session)
     }
 
     private func truncate(_ value: String, limit: Int) -> String {
