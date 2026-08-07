@@ -3,6 +3,7 @@ package transcript
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/vxider/agent-buddy/internal/model"
@@ -92,6 +93,62 @@ func TestParseLineCodexErrorEvent(t *testing.T) {
 	}
 	if update.Error != "HTTP 401 Unauthorized" {
 		t.Fatalf("unexpected Codex error: %q", update.Error)
+	}
+}
+
+func TestParseLineTaskCompleteNestedError(t *testing.T) {
+	line := []byte(`{"timestamp":"2026-08-07T08:24:12.214Z","type":"event_msg","payload":{"type":"task_complete","error":{"message":"unexpected status 503 Service Unavailable: auth_unavailable"}}}`)
+	update, ok := parseLine("sess-1", line)
+	if !ok {
+		t.Fatalf("expected parse success")
+	}
+	if update.Error != "unexpected status 503 Service Unavailable: auth_unavailable" {
+		t.Fatalf("unexpected task completion error: %q", update.Error)
+	}
+}
+
+func TestParseLineTaskCompleteUsageLimitError(t *testing.T) {
+	line := []byte(`{"timestamp":"2026-07-24T03:15:16.529Z","type":"event_msg","payload":{"type":"task_complete","last_agent_message":null,"error":{"message":"You've hit your usage limit. To get more access now, send a request to your admin or try again at Aug 23rd, 2026 3:35 AM.","codex_error_info":"usage_limit_exceeded"}}}`)
+	update, ok := parseLine("sess-usage-limit", line)
+	if !ok || !update.TaskCompleted {
+		t.Fatalf("expected usage-limit task completion, got ok=%v update=%#v", ok, update)
+	}
+	if update.Error != "You've hit your usage limit. To get more access now, send a request to your admin or try again at Aug 23rd, 2026 3:35 AM." {
+		t.Fatalf("unexpected usage-limit error: %q", update.Error)
+	}
+	if !model.IsCodexInterruptionText(update.Error) {
+		t.Fatalf("expected usage-limit error to be classified as Codex interruption: %q", update.Error)
+	}
+}
+
+func TestParseLineSuccessfulTaskCompleteDoesNotCreateError(t *testing.T) {
+	line := []byte(`{"timestamp":"2026-08-07T08:24:12.214Z","type":"event_msg","payload":{"type":"task_complete"}}`)
+	update, ok := parseLine("sess-1", line)
+	if !ok || !update.TaskCompleted || update.Error != "" {
+		t.Fatalf("expected successful task completion marker, got ok=%v update=%#v", ok, update)
+	}
+}
+
+func TestRecoverSessionHandlesLargeTranscriptLine(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "rollout-2026-08-07T08-24-12-sess-1.jsonl")
+	content := "{" +
+		`"timestamp":"2026-08-07T08:24:00Z","type":"unknown","padding":"` +
+		strings.Repeat("x", 2*1024*1024) +
+		`"}` + "\n" +
+		`{"timestamp":"2026-08-07T08:24:12.214Z","type":"event_msg","payload":{"type":"task_complete","error":{"message":"HTTP 503 Service Unavailable"}}}` + "\n" +
+		`{"timestamp":"2026-08-07T08:24:13Z","type":"turn_context","payload":{"turn_id":"turn-2"}}` + "\n" +
+		`{"timestamp":"2026-08-07T08:24:14Z","type":"event_msg","payload":{"type":"user_message","message":"resume after failure"}}` + "\n"
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatalf("write transcript: %v", err)
+	}
+
+	update, err := RecoverSession(path, "sess-1")
+	if err != nil {
+		t.Fatalf("recover session: %v", err)
+	}
+	if update.Error != "HTTP 503 Service Unavailable" {
+		t.Fatalf("unexpected recovered error: %q", update.Error)
 	}
 }
 

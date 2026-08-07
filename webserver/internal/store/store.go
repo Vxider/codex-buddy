@@ -237,6 +237,14 @@ func (s *Store) ApplyTranscriptUpdate(update model.TranscriptUpdate) model.Statu
 			session.CurrentAttentionDeadline = time.Time{}
 		}
 	}
+	if update.TaskCompleted && update.Error == "" && session.CodexInterruption {
+		session.CodexInterruption = false
+		session.LastError = ""
+		if session.State == model.StateError {
+			session.State = model.StateIdle
+			session.StateDetail = string(model.StateIdle)
+		}
+	}
 	if update.GoalUpdated {
 		session.GoalState = update.GoalState
 		session.GoalSummary = preview(update.GoalSummary)

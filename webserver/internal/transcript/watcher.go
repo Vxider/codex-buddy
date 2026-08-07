@@ -88,24 +88,24 @@ func RecoverSession(path, sessionID string) (model.TranscriptUpdate, error) {
 	}
 	defer file.Close()
 
-	scanner := bufio.NewScanner(file)
-	buffer := make([]byte, 0, 64*1024)
-	scanner.Buffer(buffer, 1024*1024)
+	reader := bufio.NewReader(file)
 
 	var out model.TranscriptUpdate
-	for scanner.Scan() {
-		line := bytes.TrimSpace(scanner.Bytes())
-		if len(line) == 0 {
-			continue
+	for {
+		line, readErr := reader.ReadBytes('\n')
+		line = bytes.TrimSpace(line)
+		if len(line) > 0 {
+			update, ok := parseLine(sessionID, line)
+			if ok {
+				mergeUpdate(&out, update)
+			}
 		}
-		update, ok := parseLine(sessionID, line)
-		if !ok {
-			continue
+		if readErr == io.EOF {
+			break
 		}
-		mergeUpdate(&out, update)
-	}
-	if err := scanner.Err(); err != nil {
-		return model.TranscriptUpdate{}, err
+		if readErr != nil {
+			return model.TranscriptUpdate{}, readErr
+		}
 	}
 
 	if out.SessionID == "" {
@@ -307,6 +307,13 @@ func parseLine(sessionID string, line []byte) (model.TranscriptUpdate, bool) {
 			if !intentionalAbort(payload.Reason) {
 				update.Error = firstNonEmptyText(payload.Message, payload.ErrorMessage, rawErrorText(payload.Error), payload.AggregatedOutput, strings.ReplaceAll(payload.Type, "_", " "))
 			}
+		case "task_complete":
+			// Codex reports failed turns in task_complete with the message
+			// nested under payload.error rather than as a top-level message.
+			update.TaskCompleted = true
+			if errorText := firstNonEmptyText(payload.Message, payload.ErrorMessage, rawErrorText(payload.Error), payload.AggregatedOutput); errorText != "" {
+				update.Error = errorText
+			}
 		}
 		return update, hasUsefulTranscriptUpdate(update)
 	default:
@@ -364,9 +371,16 @@ func mergeUpdate(dst *model.TranscriptUpdate, src model.TranscriptUpdate) {
 	if src.LastBashCommand != "" {
 		dst.LastBashCommand = src.LastBashCommand
 	}
-	if src.Error != "" {
+	if src.TaskCompleted {
+		dst.TaskCompleted = true
+		if src.Error != "" {
+			dst.Error = src.Error
+		} else {
+			dst.Error = ""
+		}
+	} else if src.Error != "" {
 		dst.Error = src.Error
-	} else if hasNonErrorProgress(src) {
+	} else if hasNonErrorProgress(src) && !dst.TaskCompleted {
 		dst.Error = ""
 	}
 	if src.GoalUpdated {
@@ -442,6 +456,7 @@ func hasUsefulTranscriptUpdate(update model.TranscriptUpdate) bool {
 		update.LastAssistantMessage != "" ||
 		update.LastBashCommand != "" ||
 		update.Error != "" ||
+		update.TaskCompleted ||
 		update.GoalUpdated ||
 		update.GoalState != ""
 }
