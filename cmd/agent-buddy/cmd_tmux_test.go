@@ -76,7 +76,7 @@ func TestSummarizeTmuxWindowsPriority(t *testing.T) {
 	status := apiStatus{
 		Sessions: []apiSession{
 			// Two sessions in same window: one running (green), one error (red)
-			{SessionID: "sess-err", State: model.StateError, TmuxWindow: "@24"},
+			{SessionID: "sess-err", State: model.StateError, CodexInterruption: true, TmuxWindow: "@24"},
 			{SessionID: "sess-run", State: model.StateRunning, TmuxWindow: "@24"},
 		},
 	}
@@ -107,6 +107,20 @@ func TestSummarizeTmuxWindowsPriority(t *testing.T) {
 	result3 := summarizeTmuxWindows(status3)
 	if result3["@26"] != tmuxStateNone {
 		t.Fatalf("expected none for idle @26, got %v", result3["@26"])
+	}
+
+	status4 := apiStatus{
+		Sessions: []apiSession{
+			{SessionID: "sess-command-failure", State: model.StateError, TmuxWindow: "@27"},
+			{SessionID: "sess-approval", State: model.StateAttention, TmuxWindow: "@28"},
+		},
+	}
+	result4 := summarizeTmuxWindows(status4)
+	if result4["@27"] != tmuxStateNone {
+		t.Fatalf("expected ordinary command failure to have no red dot, got %v", result4["@27"])
+	}
+	if result4["@28"] != tmuxStateYellow {
+		t.Fatalf("expected approval attention to have yellow dot, got %v", result4["@28"])
 	}
 }
 

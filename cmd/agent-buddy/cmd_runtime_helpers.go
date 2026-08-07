@@ -68,10 +68,11 @@ func firstNonEmpty(values ...string) string {
 }
 
 type apiSession struct {
-	SessionID  string          `json:"session_id"`
-	State      model.State     `json:"state"`
-	TmuxWindow string          `json:"tmux_window,omitempty"`
-	GoalState  model.GoalState `json:"goal_state,omitempty"`
+	SessionID         string          `json:"session_id"`
+	State             model.State     `json:"state"`
+	CodexInterruption bool            `json:"codex_interruption,omitempty"`
+	TmuxWindow        string          `json:"tmux_window,omitempty"`
+	GoalState         model.GoalState `json:"goal_state,omitempty"`
 }
 
 type apiStatus struct {

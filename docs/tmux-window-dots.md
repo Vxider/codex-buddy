@@ -6,7 +6,7 @@
 
 | Color   | Hex       | Meaning                          | Trigger Condition                              |
 |---------|-----------|----------------------------------|------------------------------------------------|
-| Red     | `#ff0000` | Codex abnormal interruption      | Session state is `error`                         |
+| Red     | `#ff0000` | Codex abnormal interruption      | `codex_interruption` is true                     |
 | Yellow  | `#ffff00` | Attention / stopped (unread)     | Session state is `attention`, or session was running and is now idle; user hasn't focused the window |
 | Purple  | `#af00ff` | Goal running                     | Session is running with an active goal         |
 | Green   | `#00ff00` | Running normal task              | Session is running without an active goal      |
@@ -21,7 +21,7 @@ red > yellow > purple > green
 
 ## State Transitions
 
-- **Red**: Triggered by `error` state, including Codex authentication failures, HTTP errors (401/402/403/429/500/502/503/504), exhausted quota or credits, rate limits, network interruptions, connection failures, timeouts, and service failures. It does not trigger yellow when cleared.
+- **Red**: Triggered only by a Codex interruption, including authentication failures, HTTP errors (401/402/403/429/500/502/503/504), exhausted quota or credits, rate limits, network interruptions, connection failures, timeouts, and service failures. Ordinary command failures and approval requests do not trigger red.
 - **Yellow**: Triggered by `attention` state or when a running session transitions to `idle`. Cleared when:
   - User focuses the window
   - Session starts running again

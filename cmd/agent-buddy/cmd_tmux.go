@@ -86,8 +86,12 @@ func runTmuxWindowDot(args []string) int {
 	now := time.Now().UTC()
 	status, err := fetchStatusWithTimeout(cfg, time.Duration(timeoutMS)*time.Millisecond)
 	if err != nil {
-		// A status fetch failure is itself a red Codex interruption signal.
-		printTmuxDot(tmuxStateRed)
+		// Do not turn a temporary status fetch failure into a false red dot.
+		// Preserve only the short-lived running fallback or unread stop state.
+		dotState, loadErr := loadTmuxDotState()
+		if loadErr == nil {
+			printTmuxDot(tmuxStateForWindow(nil, dotState, windowID, now))
+		}
 		return 0
 	}
 
@@ -238,7 +242,9 @@ func summarizeTmuxWindows(status apiStatus) map[string]tmuxWindowState {
 		var s tmuxWindowState
 		switch session.State {
 		case model.StateError:
-			s = tmuxStateRed
+			if session.CodexInterruption {
+				s = tmuxStateRed
+			}
 		case model.StateAttention:
 			s = tmuxStateYellow
 		case model.StateRun, model.StateRunning, model.StateRunningBash:

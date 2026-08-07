@@ -111,12 +111,14 @@ func (s *Store) ApplyIngest(req model.IngestRequest) model.StatusSnapshot {
 	switch event {
 	case "sessionstart":
 		session.PendingApprovalAt = time.Time{}
+		session.CodexInterruption = false
 		session.State = model.StateIdle
 		session.StateDetail = string(model.StateIdle)
 		session.LastError = ""
 		session.CurrentAttentionDeadline = time.Time{}
 	case "userpromptsubmit":
 		session.PendingApprovalAt = time.Time{}
+		session.CodexInterruption = false
 		session.State = model.StateRunning
 		session.StateDetail = string(model.StateRunning)
 		session.LastError = ""
@@ -179,6 +181,7 @@ func (s *Store) ApplyIngest(req model.IngestRequest) model.StatusSnapshot {
 		s.logger.Printf("ignoring unknown event=%q session=%q", event, sessionID)
 	}
 	if model.IsCodexInterruptionText(req.Payload.Error) {
+		session.CodexInterruption = true
 		session.LastError = preview(req.Payload.Error)
 		session.PendingApprovalAt = time.Time{}
 		session.CurrentAttentionDeadline = time.Time{}
@@ -248,6 +251,7 @@ func (s *Store) ApplyTranscriptUpdate(update model.TranscriptUpdate) model.Statu
 	if update.Error != "" {
 		session.LastError = preview(update.Error)
 		if model.IsCodexInterruptionText(update.Error) {
+			session.CodexInterruption = true
 			session.State = model.StateError
 			session.StateDetail = string(model.StateError)
 			session.PendingApprovalAt = time.Time{}

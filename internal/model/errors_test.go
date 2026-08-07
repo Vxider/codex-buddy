@@ -9,6 +9,7 @@ func TestIsCodexInterruptionTextRecognizesServiceAndTransportFailures(t *testing
 		"HTTP 403 Forbidden",
 		"HTTP 429 Too Many Requests",
 		"HTTP 503 Service Unavailable",
+		"■ You've hit your usage limit.",
 		"quota exhausted",
 		"network connection timed out",
 		"网络连接中断，额度已用光",

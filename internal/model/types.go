@@ -68,6 +68,7 @@ type SessionSnapshot struct {
 	LastBashCommand          string    `json:"last_bash_command,omitempty"`
 	TranscriptPath           string    `json:"transcript_path,omitempty"`
 	LastError                string    `json:"-"`
+	CodexInterruption        bool      `json:"-"`
 	UpdatedAt                time.Time `json:"updated_at"`
 	TmuxPane                 string    `json:"-"`
 	TmuxSession              string    `json:"-"`
