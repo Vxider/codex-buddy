@@ -111,6 +111,7 @@ type TranscriptUpdate struct {
 	LastAssistantMessage  string
 	LastBashCommand       string
 	Error                 string
+	TaskStarted           bool
 	TaskCompleted         bool
 	UpdatedAt             time.Time
 	GoalUpdated           bool

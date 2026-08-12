@@ -307,6 +307,9 @@ func parseLine(sessionID string, line []byte) (model.TranscriptUpdate, bool) {
 			if !intentionalAbort(payload.Reason) {
 				update.Error = firstNonEmptyText(payload.Message, payload.ErrorMessage, rawErrorText(payload.Error), payload.AggregatedOutput, strings.ReplaceAll(payload.Type, "_", " "))
 			}
+		case "task_started":
+			update.TaskStarted = true
+			update.TurnID = payload.TurnID
 		case "task_complete":
 			// Codex reports failed turns in task_complete with the message
 			// nested under payload.error rather than as a top-level message.
@@ -371,7 +374,12 @@ func mergeUpdate(dst *model.TranscriptUpdate, src model.TranscriptUpdate) {
 	if src.LastBashCommand != "" {
 		dst.LastBashCommand = src.LastBashCommand
 	}
-	if src.TaskCompleted {
+	if src.TaskStarted {
+		dst.TaskStarted = true
+		dst.TaskCompleted = false
+		dst.Error = ""
+	} else if src.TaskCompleted {
+		dst.TaskStarted = false
 		dst.TaskCompleted = true
 		if src.Error != "" {
 			dst.Error = src.Error
@@ -456,6 +464,7 @@ func hasUsefulTranscriptUpdate(update model.TranscriptUpdate) bool {
 		update.LastAssistantMessage != "" ||
 		update.LastBashCommand != "" ||
 		update.Error != "" ||
+		update.TaskStarted ||
 		update.TaskCompleted ||
 		update.GoalUpdated ||
 		update.GoalState != ""

@@ -258,6 +258,14 @@ func (s *Store) ApplyTranscriptUpdate(update model.TranscriptUpdate) model.Statu
 			session.CurrentAttentionDeadline = time.Time{}
 		}
 	}
+	if update.TaskStarted {
+		session.CodexInterruption = false
+		session.LastError = ""
+		session.PendingApprovalAt = time.Time{}
+		session.CurrentAttentionDeadline = time.Time{}
+		session.State = model.StateRunning
+		session.StateDetail = string(model.StateRunning)
+	}
 	if update.TaskCompleted && update.Error == "" && session.CodexInterruption {
 		session.CodexInterruption = false
 		session.LastError = ""

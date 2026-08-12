@@ -83,6 +83,35 @@ func TestCodexInterruptionHookPromotesSessionToError(t *testing.T) {
 	}
 }
 
+func TestTaskStartedClearsCodexInterruption(t *testing.T) {
+	st := New(0, 0, log.New(io.Discard, "", 0))
+	now := time.Now().UTC()
+	sessionID := "interrupted-then-retried"
+
+	st.ApplyTranscriptUpdate(model.TranscriptUpdate{
+		SessionID: sessionID,
+		Error:     "HTTP 503 Service Unavailable",
+		UpdatedAt: now,
+	})
+	st.ApplyTranscriptUpdate(model.TranscriptUpdate{
+		SessionID:   sessionID,
+		TurnID:      "turn-retry",
+		TaskStarted: true,
+		UpdatedAt:   now.Add(time.Second),
+	})
+
+	session, ok := st.Session(sessionID)
+	if !ok {
+		t.Fatalf("expected session %q", sessionID)
+	}
+	if session.CodexInterruption || session.LastError != "" {
+		t.Fatalf("expected interruption metadata to clear, got interruption=%v error=%q", session.CodexInterruption, session.LastError)
+	}
+	if session.State != model.StateRunning {
+		t.Fatalf("expected retried task to be running, got %s", session.State)
+	}
+}
+
 func TestDiscoveryDoesNotKeepRunningSessionAlive(t *testing.T) {
 	st := New(0, time.Second, log.New(io.Discard, "", 0))
 	now := time.Now().UTC().Add(-2 * time.Second)

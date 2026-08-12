@@ -129,6 +129,33 @@ func TestParseLineSuccessfulTaskCompleteDoesNotCreateError(t *testing.T) {
 	}
 }
 
+func TestParseLineTaskStarted(t *testing.T) {
+	line := []byte(`{"timestamp":"2026-08-12T14:00:00Z","type":"event_msg","payload":{"type":"task_started","turn_id":"turn-retry"}}`)
+	update, ok := parseLine("sess-1", line)
+	if !ok || !update.TaskStarted || update.TurnID != "turn-retry" {
+		t.Fatalf("expected task start marker, got ok=%v update=%#v", ok, update)
+	}
+}
+
+func TestRecoverSessionTaskStartedClearsEarlierInterruption(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "rollout-2026-08-12T14-00-00-sess-1.jsonl")
+	content := "" +
+		`{"timestamp":"2026-08-12T14:00:00Z","type":"event_msg","payload":{"type":"task_complete","error":{"message":"HTTP 503 Service Unavailable"}}}` + "\n" +
+		`{"timestamp":"2026-08-12T14:01:00Z","type":"event_msg","payload":{"type":"task_started","turn_id":"turn-retry"}}` + "\n"
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatalf("write transcript: %v", err)
+	}
+
+	update, err := RecoverSession(path, "sess-1")
+	if err != nil {
+		t.Fatalf("recover session: %v", err)
+	}
+	if !update.TaskStarted || update.TaskCompleted || update.Error != "" {
+		t.Fatalf("expected active retry to replace earlier interruption, got %#v", update)
+	}
+}
+
 func TestRecoverSessionHandlesLargeTranscriptLine(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "rollout-2026-08-07T08-24-12-sess-1.jsonl")
